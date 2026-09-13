@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOCX para PDF · Conversor local</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">↗</span> Conversor local</div>
+    <section class="converter" aria-labelledby="title">
+      <p class="eyebrow">SIMPLES. DIRETO. NO SEU COMPUTADOR.</p>
+      <h1 id="title">Seu documento,<br>agora em <span>PDF.</span></h1>
+      <p class="intro">Converta um arquivo DOCX em PDF em poucos cliques.</p>
+      <form id="convert-form">
+        <div id="drop-zone" class="drop-zone">
+          <div class="document-icon" aria-hidden="true">DOCX <span>→ PDF</span></div>
+          <p class="drop-title">Arraste seu arquivo até aqui</p>
+          <p class="drop-alternative">ou</p>
+          <button id="select-button" class="select-button" type="button">Selecionar arquivo</button>
+          <input id="file-input" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <p class="file-limit">Somente .docx · Até 20 MB</p>
+        </div>
+        <p id="file-name" class="file-name" aria-live="polite">Nenhum arquivo selecionado</p>
+        <button id="convert-button" class="convert-button" type="submit" disabled>
+          <span id="spinner" class="spinner" aria-hidden="true" hidden></span>
+          <span id="button-label">Converter para PDF</span>
+        </button>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p id="error" class="error" role="alert" hidden></p>
+      </form>
+      <p class="privacy">Processamento local. Arquivos temporários apagados após a conversão.</p>
+    </section>
+    <footer>DOCX → PDF <span>Conversão com LibreOffice</span></footer>
+  </main>
+</body>
+</html>

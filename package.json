@@ -1,0 +1,17 @@
+{
+  "name": "docx-to-pdf-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Conversor local de DOCX para PDF com Express e LibreOffice.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "file-type": "22.1.0",
+    "multer": "2.3.0"
+  }
+}
