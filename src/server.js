@@ -1,12 +1,14 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import convertRouter from './routes/convert.js';
+import formatsRouter from './routes/formats.js';
 import { checkLibreOffice } from './services/converter.js';
 
 const app = express();
 const port = 3000;
 app.disable('x-powered-by');
 app.use('/convert', convertRouter);
+app.use('/formats', formatsRouter);
 app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))));
 app.use((error, req, res, next) => {
   console.error('Erro interno:', error.message);

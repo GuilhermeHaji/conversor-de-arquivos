@@ -22,6 +22,9 @@ button:focus-visible { outline: 3px solid #77ab92; outline-offset: 4px; }
 .select-button:hover:enabled { background: #f2f7f3; }
 .file-limit { margin: 18px 0 0; color: #6c7b74; font-size: 12px; }
 .file-name { min-height: 18px; margin: 14px 0; color: #64786d; font-size: 12px; overflow-wrap: anywhere; }
+.target-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; text-align: left; font-size: 13px; }
+.target-field select { min-width: 110px; padding: 10px; border: 1px solid #c9d7ce; border-radius: 8px; background: white; color: #254a3d; font: inherit; }
+.target-field select:focus-visible { outline: 3px solid #77ab92; outline-offset: 3px; }
 .convert-button { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; min-height: 49px; padding: 13px; border: 0; background: #28745d; color: white; font-size: 14px; font-weight: 600; }
 .convert-button:hover:enabled { background: #205e4b; }
 button:disabled { cursor: not-allowed; opacity: .55; }

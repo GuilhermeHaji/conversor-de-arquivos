@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import express from 'express';
 import router from '../src/routes/convert.js';
-import { checkLibreOffice, convertDocxToPdf } from '../src/services/converter.js';
+import formatsRouter from '../src/routes/formats.js';
+import { checkLibreOffice, convert } from '../src/services/converter.js';
 
 const tmpRoot = fileURLToPath(new URL('../tmp/', import.meta.url));
 const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -60,9 +61,31 @@ const docx = zip({
   'word/document.xml': '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Teste de conversão</w:t></w:r></w:p></w:body></w:document>',
 });
 
-function form(data = docx, filename = 'documento.docx', type = mime, field = 'file') {
+// As outras famílias exercitam a identificação real do conteúdo ZIP pelo file-type.
+function officeFixture(part, contentType, xml) {
+  return zip({
+    '[Content_Types].xml': `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/${part}" ContentType="${contentType}"/></Types>`,
+    [part]: xml,
+  });
+}
+const fixtures = {
+  docx,
+  odt: zip({
+    mimetype: 'application/vnd.oasis.opendocument.text',
+    'content.xml': '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"/>',
+  }),
+  xlsx: officeFixture('xl/workbook.xml',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>'),
+  pptx: officeFixture('ppt/presentation.xml',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+    '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>'),
+};
+
+function form(data = docx, filename = 'documento.docx', type = mime, field = 'file', to = 'pdf') {
   const body = new FormData();
   body.append(field, new Blob([data], { type }), filename);
+  body.append('to', to);
   return body;
 }
 
@@ -90,6 +113,7 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     const child = new EventEmitter();
     const outputDir = args[args.indexOf('--outdir') + 1];
     const input = args.at(-1);
+    const target = args[args.indexOf('--convert-to') + 1].split(':')[0];
     calls.push({ command, args, options, outputDir, input });
     child.pid = 987654321;
     child.kill = () => { killed = true; setImmediate(() => child.emit('close', null)); return true; };
@@ -97,11 +121,15 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     if (mode === 'hang') return child;
     setImmediate(async () => {
       try {
-        assert.deepEqual((await readFile(input)).subarray(0, docx.length), docx);
-        if (mode === 'success') {
+        const fixture = fixtures[path.extname(input).slice(1)];
+        assert.deepEqual((await readFile(input)).subarray(0, fixture.length), fixture);
+        if (mode === 'success' || mode === 'wrong-extension' || mode === 'empty-output') {
           await mkdir(path.join(outputDir, 'profile'));
           await writeFile(path.join(outputDir, 'profile', 'lock'), 'perfil simulado');
-          await writeFile(path.join(outputDir, `${path.parse(input).name}.pdf`), outputPdf);
+          const output = target === 'pdf' ? outputPdf : fixtures[target] || Buffer.from('Produto,Quantidade\nCafé,2\n');
+          const outputExtension = mode === 'wrong-extension' ? 'unexpected' : target;
+          await writeFile(path.join(outputDir, `${path.parse(input).name}.${outputExtension}`),
+            mode === 'empty-output' ? Buffer.alloc(0) : output);
         }
         child.emit('close', mode === 'error' ? 1 : 0);
       } catch (error) {
@@ -130,11 +158,26 @@ test('API HTTP e limpeza dos temporários', async (t) => {
   let pendingChild;
   const app = express();
   app.use('/convert', router);
+  app.use('/formats', formatsRouter);
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const url = `http://127.0.0.1:${server.address().port}/convert`;
   const post = (body, headers) => fetch(url, { method: 'POST', body, headers });
+
+  await t.test('GET /formats expõe somente as quatro entradas e os sete pares permitidos', async () => {
+    const response = await fetch(new URL('/formats', url));
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.deepEqual(Object.keys(data), ['docx', 'odt', 'xlsx', 'pptx']);
+    assert.deepEqual(Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value.outputs])), {
+      docx: ['pdf', 'odt'], odt: ['pdf', 'docx'], xlsx: ['pdf', 'csv'], pptx: ['pdf'],
+    });
+    for (const [extension, entry] of Object.entries(data)) {
+      assert.equal(entry.extension, extension);
+      assert.equal(typeof entry.mime, 'string');
+    }
+  });
 
   await t.test('download, Unicode, MIME real e nomes UUID', async () => {
     const response = await post(form(docx, 'relatório final.DOCX', 'text/plain'));
@@ -160,6 +203,30 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     await assertClean();
   });
 
+  for (const [source, to, expectedMime] of [
+    ['docx', 'odt', 'application/vnd.oasis.opendocument.text'],
+    ['odt', 'pdf', 'application/pdf'],
+    ['odt', 'docx', mime],
+    ['xlsx', 'pdf', 'application/pdf'],
+    ['xlsx', 'csv', 'text/csv'],
+    ['pptx', 'pdf', 'application/pdf'],
+  ]) {
+    await t.test(`converte ${source.toUpperCase()} → ${to.toUpperCase()}`, async () => {
+      const response = await post(form(fixtures[source], `relatório.final.${source}`, 'application/octet-stream', 'file', to));
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type').split(';')[0], expectedMime);
+      assert.ok(response.headers.get('content-disposition').includes(`relatório.final.${to}`));
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.deepEqual(bytes, to === 'pdf' ? pdf : fixtures[to] || Buffer.from('Produto,Quantidade\nCafé,2\n'));
+      const call = calls.at(-1);
+      assert.equal(path.extname(call.input), `.${source}`);
+      assert.equal(call.args[call.args.indexOf('--convert-to') + 1].split(':')[0], to);
+      assert.equal(call.options.shell, false);
+      assert.match(call.args[0], /^-env:UserInstallation=file:/);
+      await assertClean();
+    });
+  }
+
   await t.test('aceita exatamente 20 MB', async () => {
     const data = Buffer.alloc(20 * 1024 * 1024);
     docx.copy(data);
@@ -170,6 +237,17 @@ test('API HTTP e limpeza dos temporários', async (t) => {
   });
 
   const invalidCases = [
+    ['campo to ausente', () => { const body = form(); body.delete('to'); return body; }],
+    ['campo to vazio', () => form(docx, 'documento.docx', mime, 'file', '')],
+    ['destino não permitido para DOCX', () => form(docx, 'documento.docx', mime, 'file', 'csv')],
+    ['destino não permitido para PPTX', () => form(fixtures.pptx, 'slides.pptx', mime, 'file', 'odt')],
+    ['destino com opções de linha de comando', () => form(docx, 'documento.docx', mime, 'file', 'pdf:../../escape')],
+    ['destino duplicado', () => { const body = form(); body.append('to', 'odt'); return body; }],
+    ['destino como array', () => { const body = form(); body.delete('to'); body.append('to[]', 'pdf'); return body; }],
+    ['campo de texto adicional', () => { const body = form(); body.append('extra', 'valor'); return body; }],
+    ['PDF como entrada', () => form(pdf, 'documento.pdf')],
+    ['extensão válida de outra família', () => form(docx, 'documento.xlsx')],
+    ['chave herdada como extensão', () => form(docx, 'documento.constructor')],
     ['arquivo ausente', () => new FormData()],
     ['extensão incorreta com conteúdo DOCX', () => form(docx, 'documento.txt')],
     ['MIME falsificado e texto renomeado', () => form(Buffer.from('texto falso'))],
@@ -179,6 +257,7 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     ['campo diferente de file', () => form(docx, 'documento.docx', mime, 'upload')],
     ['mais de um arquivo', () => { const body = form(); body.append('file', new Blob([docx]), 'outro.docx'); return body; }],
     ['tamanho acima de 20 MB', () => form(Buffer.alloc(20 * 1024 * 1024 + 1))],
+    ...['odt', 'xlsx', 'pptx'].map((ext) => [`conteúdo falsificado para ${ext}`, () => form(Buffer.from('texto falso'), `arquivo.${ext}`)]),
   ];
   for (const [name, body] of invalidCases) {
     await t.test(`400: ${name}`, async () => {
@@ -217,7 +296,7 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     await assertClean();
   });
 
-  for (const value of ['error', 'no-pdf']) {
+  for (const value of ['error', 'no-pdf', 'wrong-extension', 'empty-output']) {
     await t.test(`500 e limpeza: ${value}`, async () => {
       mode = value;
       const response = await post(form());
@@ -250,6 +329,7 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     const spawned = new Promise((resolve) => { onSpawn = (child) => { pendingChild = child; resolve(); }; });
     const boundary = 'test-boundary';
     const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="to"\r\n\r\npdf\r\n`),
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="teste.docx"\r\nContent-Type: ${mime}\r\n\r\n`),
       docx, Buffer.from(`\r\n--${boundary}--\r\n`),
     ]);
@@ -320,6 +400,13 @@ test('cancelamento anterior ao spawn não inicia conversão', async (t) => {
   const spawn = t.mock.method(childProcess, 'spawn', () => { throw new Error('Não deve executar'); });
   const controller = new AbortController();
   controller.abort();
-  await assert.rejects(convertDocxToPdf('/input.docx', '/output', { signal: controller.signal }), /cancelada/);
+  await assert.rejects(convert('/input.docx', '/output', 'pdf', { signal: controller.signal }), /cancelada/);
+  assert.equal(spawn.mock.callCount(), 0);
+});
+
+test('serviço recusa destinos arbitrários antes de executar o motor', async (t) => {
+  const spawn = t.mock.method(childProcess, 'spawn', () => { throw new Error('Não deve executar'); });
+  await assert.rejects(convert('/input.docx', '/output', '../../escape'), /não permitido/);
+  await assert.rejects(convert('/input.pdf', '/output', 'docx'), /não permitido/);
   assert.equal(spawn.mock.callCount(), 0);
 });

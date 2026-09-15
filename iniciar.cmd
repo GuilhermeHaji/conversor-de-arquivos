@@ -34,7 +34,10 @@ echo Nenhuma mudanca nova desde o ultimo ponto de retorno.
 goto historico
 
 :docommit
-git commit -m "MVP docx para pdf"
+set "MSG="
+set /p MSG=Descreva em poucas palavras o que mudou (Enter para usar uma descricao padrao):
+if not defined MSG set "MSG=Atualizacao de %DATE% %TIME:~0,5%"
+git commit -m "%MSG%"
 if errorlevel 1 goto commitfalhou
 echo Ponto de retorno criado com sucesso.
 

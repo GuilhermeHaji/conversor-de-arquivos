@@ -8,35 +8,84 @@ const buttonLabel = document.querySelector('#button-label');
 const spinner = document.querySelector('#spinner');
 const status = document.querySelector('#status');
 const errorBox = document.querySelector('#error');
+const targetField = document.querySelector('#target-field');
+const targetSelect = document.querySelector('#target-format');
+const fileLimit = document.querySelector('#file-limit');
 let selectedFile = null;
 let busy = false;
+let formatsPromise;
+let selectionVersion = 0;
 
 function showError(message) {
   errorBox.textContent = message;
   errorBox.hidden = false;
 }
 
-function selectFile(files) {
+function loadFormats() {
+  // Compartilha a mesma consulta entre a inicialização e as seleções de arquivo.
+  if (!formatsPromise) {
+    formatsPromise = fetch('/formats').then(async (response) => {
+      if (!response.ok) throw new Error('Não foi possível carregar os formatos. Selecione o arquivo para tentar novamente.');
+      const formats = await response.json();
+      fileInput.accept = Object.values(formats).flatMap(({ extension, mime }) => [`.${extension}`, mime]).join(',');
+      fileLimit.textContent = `${Object.keys(formats).map((ext) => ext.toUpperCase()).join(', ')} · Até 20 MB`;
+      return formats;
+    }).catch((error) => {
+      formatsPromise = null;
+      throw error;
+    });
+  }
+  return formatsPromise;
+}
+
+function updateButton() {
+  buttonLabel.textContent = busy ? 'Convertendo...'
+    : targetSelect.value ? `Converter para ${targetSelect.value.toUpperCase()}` : 'Converter arquivo';
+}
+
+async function selectFile(files) {
   if (busy || !files.length) return;
+  const version = ++selectionVersion;
   selectedFile = null;
   convertButton.disabled = true;
+  targetField.hidden = true;
+  targetSelect.replaceChildren();
+  updateButton();
   errorBox.hidden = true;
   status.textContent = '';
   fileName.textContent = 'Nenhum arquivo selecionado';
 
   if (files.length !== 1) return showError('Selecione somente um arquivo por vez.');
   const file = files[0];
-  if (!/\.docx$/i.test(file.name)) return showError('Selecione um arquivo com extensão .docx.');
   if (file.size > 20 * 1024 * 1024) return showError('O arquivo excede o tamanho máximo de 20 MB.');
 
-  selectedFile = file;
-  fileName.textContent = file.name;
-  convertButton.disabled = false;
+  try {
+    const formats = await loadFormats();
+    // Uma resposta atrasada não deve sobrescrever uma seleção mais recente.
+    if (version !== selectionVersion) return;
+    const extension = file.name.match(/\.([^.]+)$/)?.[1].toLowerCase();
+    if (!Object.hasOwn(formats, extension)) return showError('Formato de entrada não suportado. Escolha um dos formatos indicados.');
+    for (const target of formats[extension].outputs) {
+      const option = document.createElement('option');
+      option.value = target;
+      option.textContent = target.toUpperCase();
+      targetSelect.append(option);
+    }
+    selectedFile = file;
+    fileName.textContent = file.name;
+    targetField.hidden = false;
+    convertButton.disabled = false;
+    updateButton();
+  } catch (error) {
+    if (version === selectionVersion) showError(error.message);
+  }
 }
 
+loadFormats().catch(() => showError('Não foi possível carregar os formatos. Selecione o arquivo para tentar novamente.'));
+targetSelect.addEventListener('change', updateButton);
 selectButton.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
-  selectFile(fileInput.files);
+  selectFile([...fileInput.files]);
   fileInput.value = '';
 });
 for (const eventName of ['dragenter', 'dragover']) {
@@ -51,16 +100,17 @@ dropZone.addEventListener('dragleave', (event) => {
 dropZone.addEventListener('drop', (event) => {
   event.preventDefault();
   dropZone.classList.remove('dragging');
-  selectFile(event.dataTransfer.files);
+  selectFile([...event.dataTransfer.files]);
 });
 
 function setBusy(value) {
   busy = value;
   selectButton.disabled = value;
   fileInput.disabled = value;
-  convertButton.disabled = value || !selectedFile;
+  targetSelect.disabled = value;
+  convertButton.disabled = value || !selectedFile || !targetSelect.value;
   spinner.hidden = !value;
-  buttonLabel.textContent = value ? 'Convertendo...' : 'Converter para PDF';
+  updateButton();
   form.setAttribute('aria-busy', String(value));
 }
 
@@ -76,7 +126,8 @@ function getDownloadName(response, fallback) {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!selectedFile || busy) return;
+  if (!selectedFile || !targetSelect.value || busy) return;
+  const targetFormat = targetSelect.value;
   errorBox.hidden = true;
   status.textContent = 'Convertendo... Aguarde a conclusão.';
   setBusy(true);
@@ -84,6 +135,7 @@ form.addEventListener('submit', async (event) => {
   try {
     const body = new FormData();
     body.append('file', selectedFile);
+    body.append('to', targetFormat);
     const response = await fetch('/convert', { method: 'POST', body });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -93,13 +145,13 @@ form.addEventListener('submit', async (event) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = getDownloadName(response, selectedFile.name.replace(/\.docx$/i, '.pdf'));
+    link.download = getDownloadName(response, selectedFile.name.replace(/\.[^.]+$/, `.${targetFormat}`));
     document.body.append(link);
     link.click();
     link.remove();
     // Dá tempo ao navegador para iniciar o download antes de liberar o objeto.
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    status.textContent = 'PDF pronto! O download foi iniciado.';
+    status.textContent = `${targetFormat.toUpperCase()} pronto! O download foi iniciado.`;
   } catch (error) {
     status.textContent = '';
     showError(error instanceof TypeError

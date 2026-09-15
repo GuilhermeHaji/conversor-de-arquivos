@@ -2,6 +2,7 @@ import childProcess from 'node:child_process';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { getConversionArgument } from './formats.js';
 
 const CONVERSION_TIMEOUT_MS = 60_000;
 
@@ -80,19 +81,23 @@ export async function checkLibreOffice() {
   }
 }
 
-export async function convertDocxToPdf(inputPath, outputDir, { signal } = {}) {
+export async function convert(inputPath, outputDir, targetFormat, { signal } = {}) {
+  const extension = path.extname(inputPath).slice(1).toLowerCase();
+  const conversionArgument = getConversionArgument(extension, targetFormat);
+  if (!conversionArgument) throw new Error('Par de conversão não permitido.');
+
   // Um perfil por conversão evita conflito com outras instâncias do LibreOffice.
   const profileUrl = pathToFileURL(path.join(outputDir, 'profile')).href;
   await runOffice([
     `-env:UserInstallation=${profileUrl}`,
-    '--headless', '--convert-to', 'pdf', '--outdir', outputDir, inputPath,
+    '--headless', '--convert-to', conversionArgument, '--outdir', outputDir, inputPath,
   ], { timeoutMs: CONVERSION_TIMEOUT_MS, signal });
 
-  const pdfPath = path.join(outputDir, `${path.parse(inputPath).name}.pdf`);
-  const pdf = await stat(pdfPath).catch(() => null);
-  // O LibreOffice pode sair com código zero mesmo sem produzir um PDF.
-  if (!pdf?.isFile() || pdf.size === 0) {
-    throw new Error('O LibreOffice não gerou um PDF. Verifique se o DOCX está íntegro e sem senha.');
+  const outputPath = path.join(outputDir, `${path.parse(inputPath).name}.${targetFormat}`);
+  const output = await stat(outputPath).catch(() => null);
+  // O LibreOffice pode sair com código zero mesmo sem produzir o arquivo esperado.
+  if (!output?.isFile() || output.size === 0) {
+    throw new Error(`O LibreOffice não gerou um arquivo ${targetFormat.toUpperCase()}. Verifique se o arquivo está íntegro e sem senha.`);
   }
-  return pdfPath;
+  return outputPath;
 }
