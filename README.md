@@ -1,8 +1,27 @@
-# Conversor local de arquivos
+# Conversor de arquivos
 
-MVP com Node.js, Express, multer, file-type e uma página HTML/CSS/JS sem framework. Converte arquivos usando LibreOffice headless, com uma fila em memória. Sem banco de dados, autenticação ou deploy.
+Plataforma web local para converter documentos, planilhas e apresentações com Node.js e LibreOffice.
 
-## Conversões suportadas
+## Sobre o projeto
+
+Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar ou um CSV para trabalhar com dados. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando o processamento no computador em que o servidor foi iniciado.
+
+O backend Express usa o LibreOffice em modo headless e centraliza os pares permitidos em um mapa declarativo. Uma fila em memória limita a execução a duas conversões simultâneas para controlar o uso de CPU e memória. O frontend usa apenas HTML, CSS e JavaScript; o projeto não requer banco de dados, autenticação ou serviços externos.
+
+Os uploads passam por validação de extensão, conteúdo real e tamanho antes de entrar na fila. Cada conversão recebe uma pasta com UUID e um perfil isolado do LibreOffice. O processo é iniciado sem shell, com argumentos separados, tem timeout e é cancelado quando o cliente desconecta. A limpeza dos arquivos temporários fica em `finally`, inclusive nos caminhos de erro.
+
+## Funcionalidades
+
+- Upload por seleção ou arrastar e soltar, com limite de 20 MB por arquivo.
+- Destinos disponíveis conforme o formato de entrada, consultados na API.
+- Validação do conteúdo real com `file-type`.
+- Download automático, preservando o nome original com a nova extensão.
+- Fila com até duas conversões ativas, dez aguardando e espera máxima de 90 segundos.
+- Indicador de processamento e contador da fila atualizado a cada dois segundos.
+- Timeout de 60 segundos por conversão e cancelamento por desconexão.
+- Mensagens de erro do backend exibidas na interface.
+
+### Conversões suportadas
 
 | Entrada | Saídas permitidas |
 | --- | --- |
@@ -13,7 +32,19 @@ MVP com Node.js, Express, multer, file-type e uma página HTML/CSS/JS sem framew
 
 PDF não é aceito como entrada. O mapa em `src/services/formats.js` é a fonte única dos pares permitidos, das extensões, dos MIME esperados e dos argumentos de exportação.
 
-## Pré-requisitos
+## Tecnologias
+
+- Node.js 22 ou superior, com módulos ES.
+- Express para o servidor HTTP e as rotas.
+- LibreOffice headless como motor de conversão.
+- multer para receber uploads multipart.
+- file-type para identificar o formato pelo conteúdo.
+- HTML, CSS e JavaScript puros no frontend.
+- Runner de testes nativo do Node.js, sem framework adicional.
+
+## Como rodar
+
+### Pré-requisitos
 
 - Node.js 22 ou superior, com npm.
 - [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) instalado e o comando `soffice` disponível no PATH.
@@ -40,7 +71,7 @@ export PATH="/Applications/LibreOffice.app/Contents/MacOS:$PATH"
 
 No Linux, instale o LibreOffice incluindo os componentes Writer, Calc e Impress pelo gerenciador de pacotes da distribuição. As fontes disponíveis na máquina influenciam a aparência do PDF.
 
-## Instalar e rodar
+### Instalação e execução
 
 No diretório do projeto:
 
@@ -53,7 +84,17 @@ Abra **http://localhost:3000**. O servidor escuta apenas na interface local (`12
 
 Ao iniciar, o servidor executa `soffice --headless --version`. Se o comando estiver ausente ou não puder ser executado, informa como instalar/configurar o LibreOffice e encerra com código 1, sem abrir a porta.
 
-## Testar manualmente
+### Testes automatizados
+
+```sh
+npm test
+```
+
+Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Também verificam cinco conversões simultâneas com no máximo dois processos, fila cheia, espera excedida, cancelamento durante a espera e os contadores de `/status`. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
+
+Referências: [multer](https://expressjs.com/en/resources/middleware/multer/), [file-type](https://github.com/sindresorhus/file-type) e [parâmetros do LibreOffice](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html).
+
+### Teste manual
 
 1. Inicie o servidor e abra **http://localhost:3000**.
 2. **Texto — DOCX → ODT:** crie um documento com título, parágrafos, acentos e uma tabela. Salve como `relatório.docx`, selecione-o na página, escolha **ODT** e clique em **Converter para ODT**. Abra `relatório.odt` no Writer e confira o conteúdo.
@@ -84,7 +125,40 @@ curl -i -F "file=@falso.docx;type=application/vnd.openxmlformats-officedocument.
 
 Se `falso.docx` contiver texto ou outro formato, a resposta será 400 mesmo com o MIME de DOCX declarado.
 
-## API e processamento
+## Arquitetura
+
+```text
+Upload → Validação → Fila → LibreOffice → Download → Limpeza
+```
+
+A rota recebe e valida o arquivo e o destino, grava o upload em uma pasta isolada e aguarda uma vaga na fila. O serviço de conversão executa o LibreOffice e verifica a saída. A rota envia o resultado e remove os temporários ao finalizar, inclusive quando há erro ou desconexão.
+
+### Estrutura de pastas
+
+```text
+src/
+  server.js
+  routes/convert.js
+  routes/formats.js
+  routes/status.js
+  services/converter.js
+  services/formats.js
+  services/queue.js
+public/
+  index.html
+  style.css
+  app.js
+test/
+  conversion.test.js
+  queue.test.js
+package.json
+package-lock.json
+.gitignore
+README.md
+LICENSE
+```
+
+### API e processamento
 
 `GET /status` retorna os contadores atuais da fila, sem cache:
 
@@ -138,36 +212,18 @@ O serviço expõe `convert(inputPath, outputDir, targetFormat, { signal } = {})`
 
 A limpeza fica em `finally`, depois que o processo termina e que o envio do arquivo conclui ou falha. Remove original, saída e perfil em sucesso, erro, timeout e desconexão. Uploads incompletos ou rejeitados não chegam a criar arquivos no disco. Interrupção forçada do Node ou desligamento da máquina não executam `finally`.
 
-## Estrutura
+## Roadmap
 
-```text
-src/
-  server.js
-  routes/convert.js
-  routes/formats.js
-  routes/status.js
-  services/converter.js
-  services/formats.js
-  services/queue.js
-public/
-  index.html
-  style.css
-  app.js
-test/
-  conversion.test.js
-  queue.test.js
-package.json
-package-lock.json
-.gitignore
-README.md
-```
+- Adicionar novos formatos de entrada e saída.
+- Suportar conversão de arquivos em lote.
+- Preparar uma versão para deploy.
 
-## Testes automatizados
+Esses itens são próximos passos; a versão atual roda localmente e recebe um arquivo por requisição.
 
-```sh
-npm test
-```
+## Licença
 
-Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Também verificam cinco conversões simultâneas com no máximo dois processos, fila cheia, espera excedida, cancelamento durante a espera e os contadores de `/status`. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
+Distribuído sob a licença [MIT](LICENSE). Copyright © 2026 Guilherme Haji.
 
-Referências: [multer](https://expressjs.com/en/resources/middleware/multer/), [file-type](https://github.com/sindresorhus/file-type) e [parâmetros do LibreOffice](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html).
+## Demonstração
+
+**Placeholder:** adicione uma captura real da interface em `docs/screenshot.png` e inclua-a nesta seção. Nenhuma imagem de demonstração foi adicionada ainda.

@@ -1,9 +1,11 @@
 {
-  "name": "docx-to-pdf-local",
+  "name": "conversor-de-arquivos",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Conversor local de DOCX para PDF com Express e LibreOffice.",
+  "description": "Conversor local de arquivos DOCX, ODT, XLSX e PPTX com Node.js, Express e LibreOffice, com fila de processamento em memória.",
+  "author": "Guilherme Haji",
+  "license": "MIT",
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node src/server.js",
