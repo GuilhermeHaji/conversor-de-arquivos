@@ -1,6 +1,6 @@
 # Conversor local de arquivos
 
-MVP com Node.js, Express, multer, file-type e uma página HTML/CSS/JS sem framework. Converte arquivos usando LibreOffice headless. Sem fila, banco de dados, autenticação ou deploy.
+MVP com Node.js, Express, multer, file-type e uma página HTML/CSS/JS sem framework. Converte arquivos usando LibreOffice headless, com uma fila em memória. Sem banco de dados, autenticação ou deploy.
 
 ## Conversões suportadas
 
@@ -86,6 +86,14 @@ Se `falso.docx` contiver texto ou outro formato, a resposta será 400 mesmo com 
 
 ## API e processamento
 
+`GET /status` retorna os contadores atuais da fila, sem cache:
+
+```json
+{ "ativas": 2, "aguardando": 3, "limite": 2 }
+```
+
+Os números representam conversões em execução e requisições aguardando, não uploads ou downloads. Durante uma conversão, o frontend consulta essa rota a cada 2 segundos e mostra o total aguardando quando houver fila. A consulta para ao concluir ou falhar e não interfere na conversão se houver erro de rede.
+
 `GET /formats` retorna o mapa completo em JSON, com as chaves `docx`, `odt`, `xlsx` e `pptx`. Cada entrada contém `extension`, `mime` e `outputs`. Exemplo do valor da chave `docx`:
 
 ```json
@@ -108,8 +116,15 @@ Respostas:
 - **200:** arquivo para download, preservando o nome original com a extensão do destino.
 - **400:** upload ausente ou inválido, extensão/conteúdo incompatíveis, tamanho excedido, `to` ausente ou destino não permitido. JSON `{ "error": "mensagem" }`.
 - **500:** falha do motor, ausência do arquivo de saída esperado ou timeout. JSON no mesmo formato.
+- **503:** fila cheia ou tempo de espera excedido. JSON `{ "error": "Servidor ocupado no momento. Tente novamente em instantes." }`.
 
 O upload é recebido em memória, limitado a 20 MB por requisição. Após a validação, o arquivo é escrito em `tmp/<UUID>/<UUID>.<extensão_validada>`. O nome enviado pelo usuário serve apenas para nomear o download, removendo separadores e caracteres de controle.
+
+A fila em `src/services/queue.js` inicia no máximo **2 conversões simultâneas** (`MAX_CONCURRENT`), aceita até **10 requisições aguardando** (`MAX_WAITING`) e limita a espera a **90 segundos** (`MAX_WAIT_MS`). Os trabalhos aguardam em ordem de chegada. Toda a validação acontece antes de entrar na fila; arquivos inválidos não ocupam vaga. A vaga é liberada após a conversão, inclusive em caso de erro, sem esperar pelo download.
+
+Se o cliente desconectar enquanto aguarda, a entrada sai da fila e nunca inicia o LibreOffice. A limpeza no `finally` também cobre espera excedida e fila cheia. A fila existe somente na memória deste processo Node, não persiste após reinicialização e não coordena múltiplos servidores. Os 90 segundos de espera são separados do timeout de 60 segundos da conversão.
+
+Para testar a fila manualmente, abra quatro abas da página, escolha um documento em cada uma e inicie as quatro conversões em sequência rápida. Durante a sobreposição, `/status` deve mostrar no máximo duas ativas, e as páginas devem exibir o total na fila. Feche uma aba que esteja aguardando para verificar a remoção da entrada. Ao terminar todas as conversões, os contadores devem voltar a zero e `tmp/` ficar vazia. Se os arquivos converterem muito rápido, use documentos maiores, sempre respeitando 20 MB.
 
 O serviço usa `spawn` com argumentos em array e `shell: false`, com o equivalente a:
 
@@ -130,14 +145,17 @@ src/
   server.js
   routes/convert.js
   routes/formats.js
+  routes/status.js
   services/converter.js
   services/formats.js
+  services/queue.js
 public/
   index.html
   style.css
   app.js
 test/
   conversion.test.js
+  queue.test.js
 package.json
 package-lock.json
 .gitignore
@@ -150,6 +168,6 @@ README.md
 npm test
 ```
 
-Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
+Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Também verificam cinco conversões simultâneas com no máximo dois processos, fila cheia, espera excedida, cancelamento durante a espera e os contadores de `/status`. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
 
 Referências: [multer](https://expressjs.com/en/resources/middleware/multer/), [file-type](https://github.com/sindresorhus/file-type) e [parâmetros do LibreOffice](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html).

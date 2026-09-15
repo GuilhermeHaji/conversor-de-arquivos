@@ -10,6 +10,8 @@ import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import express from 'express';
 import router from '../src/routes/convert.js';
 import formatsRouter from '../src/routes/formats.js';
+import statusRouter from '../src/routes/status.js';
+import { MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS, enqueue } from '../src/services/queue.js';
 import { checkLibreOffice, convert } from '../src/services/converter.js';
 
 const tmpRoot = fileURLToPath(new URL('../tmp/', import.meta.url));
@@ -109,8 +111,14 @@ test('API HTTP e limpeza dos temporários', async (t) => {
   let onSpawn;
   let killed = false;
   let failure;
+  let activeProcesses = 0;
+  let peakProcesses = 0;
+  const releases = [];
   t.mock.method(childProcess, 'spawn', (command, args, options) => {
     const child = new EventEmitter();
+    activeProcesses++;
+    peakProcesses = Math.max(peakProcesses, activeProcesses);
+    child.once('close', () => { activeProcesses--; });
     const outputDir = args[args.indexOf('--outdir') + 1];
     const input = args.at(-1);
     const target = args[args.indexOf('--convert-to') + 1].split(':')[0];
@@ -119,11 +127,11 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     child.kill = () => { killed = true; setImmediate(() => child.emit('close', null)); return true; };
     onSpawn?.(child);
     if (mode === 'hang') return child;
-    setImmediate(async () => {
+    const finish = async () => {
       try {
         const fixture = fixtures[path.extname(input).slice(1)];
         assert.deepEqual((await readFile(input)).subarray(0, fixture.length), fixture);
-        if (mode === 'success' || mode === 'wrong-extension' || mode === 'empty-output') {
+        if (mode === 'success' || mode === 'controlled' || mode === 'wrong-extension' || mode === 'empty-output') {
           await mkdir(path.join(outputDir, 'profile'));
           await writeFile(path.join(outputDir, 'profile', 'lock'), 'perfil simulado');
           const output = target === 'pdf' ? outputPdf : fixtures[target] || Buffer.from('Produto,Quantidade\nCafé,2\n');
@@ -137,7 +145,9 @@ test('API HTTP e limpeza dos temporários', async (t) => {
         child.emit('error', error);
         child.emit('close', 1);
       }
-    });
+    };
+    if (mode === 'controlled') releases.push(() => setImmediate(finish));
+    else setImmediate(finish);
     return child;
   });
   if (process.platform === 'win32') {
@@ -159,11 +169,40 @@ test('API HTTP e limpeza dos temporários', async (t) => {
   const app = express();
   app.use('/convert', router);
   app.use('/formats', formatsRouter);
+  app.use('/status', statusRouter);
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const url = `http://127.0.0.1:${server.address().port}/convert`;
   const post = (body, headers) => fetch(url, { method: 'POST', body, headers });
+  const status = async () => (await fetch(new URL('/status', url))).json();
+  const waitForStatus = async (ativas, aguardando) => {
+    const expected = { ativas, aguardando, limite: MAX_CONCURRENT };
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const actual = await status();
+      if (actual.ativas === ativas && actual.aguardando === aguardando) {
+        assert.deepEqual(actual, expected);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.deepEqual(await status(), expected);
+  };
+  const finishRequests = async (requests) => {
+    // Libera os processos simulados por rodadas, mantendo as vagas ocupadas até o close.
+    while (true) {
+      const current = await status();
+      if (current.ativas === 0 && current.aguardando === 0) break;
+      releases.splice(0).forEach((release) => release());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const responses = await Promise.all(requests);
+    for (const response of responses) {
+      assert.equal(response.status, 200);
+      await response.arrayBuffer();
+    }
+    await assertClean();
+  };
 
   await t.test('GET /formats expõe somente as quatro entradas e os sete pares permitidos', async () => {
     const response = await fetch(new URL('/formats', url));
@@ -380,6 +419,82 @@ test('API HTTP e limpeza dos temporários', async (t) => {
     });
     await assertClean();
     outputPdf = pdf;
+  });
+
+  await t.test('cinco requisições respeitam a concorrência e atualizam GET /status', async () => {
+    mode = 'controlled';
+    calls = [];
+    peakProcesses = 0;
+    const initial = await fetch(new URL('/status', url));
+    assert.equal(initial.status, 200);
+    assert.equal(initial.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await initial.json(), { ativas: 0, aguardando: 0, limite: MAX_CONCURRENT });
+    const requests = Array.from({ length: 5 }, () => post(form()));
+    await waitForStatus(MAX_CONCURRENT, 5 - MAX_CONCURRENT);
+    assert.equal(calls.length, MAX_CONCURRENT);
+    await finishRequests(requests);
+    assert.equal(calls.length, 5);
+    assert.equal(peakProcesses, MAX_CONCURRENT);
+    await waitForStatus(0, 0);
+  });
+
+  await t.test('fila cheia retorna 503 sem processo novo e valida entradas antes da fila', async () => {
+    mode = 'controlled';
+    calls = [];
+    const requests = Array.from({ length: MAX_CONCURRENT + MAX_WAITING }, () => post(form()));
+    await waitForStatus(MAX_CONCURRENT, MAX_WAITING);
+    const rejected = await post(form());
+    assert.equal(rejected.status, 503);
+    assert.deepEqual(await rejected.json(), { error: 'Servidor ocupado no momento. Tente novamente em instantes.' });
+    assert.equal(calls.length, MAX_CONCURRENT);
+    const invalid = await post(form(Buffer.from('não é DOCX')));
+    assert.equal(invalid.status, 400);
+    await invalid.json();
+    await waitForStatus(MAX_CONCURRENT, MAX_WAITING);
+    await finishRequests(requests);
+    assert.equal(calls.length, MAX_CONCURRENT + MAX_WAITING);
+  });
+
+  await t.test('desconexão na espera remove a entrada e os temporários sem iniciar processo', async () => {
+    mode = 'controlled';
+    calls = [];
+    const requests = Array.from({ length: MAX_CONCURRENT }, () => post(form()));
+    await waitForStatus(MAX_CONCURRENT, 0);
+    const activeDirs = await readdir(tmpRoot);
+    const controller = new AbortController();
+    const disconnected = fetch(url, { method: 'POST', body: form(), signal: controller.signal }).catch((error) => error);
+    await waitForStatus(MAX_CONCURRENT, 1);
+    const queuedDir = (await readdir(tmpRoot)).find((entry) => !activeDirs.includes(entry));
+    assert.ok(queuedDir);
+    controller.abort();
+    assert.equal((await disconnected).name, 'AbortError');
+    await waitForStatus(MAX_CONCURRENT, 0);
+    for (let attempt = 0; attempt < 100 && (await readdir(tmpRoot)).includes(queuedDir); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal((await readdir(tmpRoot)).includes(queuedDir), false);
+    await finishRequests(requests);
+    assert.equal(calls.length, MAX_CONCURRENT);
+  });
+
+  await t.test('espera de 90 segundos retorna 503 e limpa sem executar conversão', async (t) => {
+    const unblock = [];
+    const blockers = Array.from({ length: MAX_CONCURRENT }, () => enqueue(() => new Promise((resolve) => unblock.push(resolve))));
+    const count = calls.length;
+    const request = post(form());
+    await waitForStatus(MAX_CONCURRENT, 1);
+    // Avança o relógio para a drenagem reconhecer a expiração antes do próximo trabalho.
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    t.mock.timers.tick(MAX_WAIT_MS);
+    unblock.forEach((resolve) => resolve());
+    await Promise.all(blockers);
+    const response = await request;
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: 'Servidor ocupado no momento. Tente novamente em instantes.' });
+    assert.equal(calls.length, count);
+    t.mock.timers.reset();
+    await assertClean();
+    await waitForStatus(0, 0);
   });
   assert.equal(failure, undefined);
 });

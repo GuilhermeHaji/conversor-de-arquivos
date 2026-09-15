@@ -124,6 +124,33 @@ function getDownloadName(response, fallback) {
   return quoted ? quoted[1].replace(/\\(.)/g, '$1') : fallback;
 }
 
+function startStatusPolling() {
+  const controller = new AbortController();
+  let stopped = false;
+  let inFlight = false;
+  const timer = setInterval(async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const response = await fetch('/status', { signal: controller.signal, cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!stopped && busy) {
+        status.textContent = data.aguardando > 0
+          ? `Convertendo... (${data.aguardando} na fila)` : 'Convertendo... Aguarde a conclusão.';
+      }
+    } catch { /* Uma falha na consulta de status não interrompe a conversão. */ }
+    finally { inFlight = false; }
+  }, 2_000);
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+    // Impede respostas atrasadas de sobrescreverem a mensagem final.
+    controller.abort();
+  };
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!selectedFile || !targetSelect.value || busy) return;
@@ -131,6 +158,7 @@ form.addEventListener('submit', async (event) => {
   errorBox.hidden = true;
   status.textContent = 'Convertendo... Aguarde a conclusão.';
   setBusy(true);
+  const stopStatusPolling = startStatusPolling();
 
   try {
     const body = new FormData();
@@ -158,6 +186,7 @@ form.addEventListener('submit', async (event) => {
       ? 'Não foi possível acessar o servidor. Verifique se ele está em execução.'
       : error.message);
   } finally {
+    stopStatusPolling();
     setBusy(false);
   }
 });

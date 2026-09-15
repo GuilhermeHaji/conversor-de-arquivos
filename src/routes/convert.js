@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { convert } from '../services/converter.js';
 import { getInputFormat, getConversionArgument } from '../services/formats.js';
+import { enqueue, QueueBusyError } from '../services/queue.js';
 
 const TMP_ROOT = fileURLToPath(new URL('../../tmp/', import.meta.url));
 const upload = multer({
@@ -72,19 +73,23 @@ async function handleConversion(req, res) {
     await writeFile(inputPath, req.file.buffer, { flag: 'wx' });
     delete req.file.buffer;
 
-    const outputPath = await convert(inputPath, tempDir, targetFormat, { signal: controller.signal });
+    const outputPath = await enqueue(
+      () => convert(inputPath, tempDir, targetFormat, { signal: controller.signal }),
+      { signal: controller.signal },
+    );
     if (res.destroyed || controller.signal.aborted) return;
     await sendDownload(res, outputPath, downloadName(req.file.originalname, targetFormat));
   } catch (error) {
     if (!res.headersSent && !res.destroyed) {
-      const message = error.message.startsWith('A conversão excedeu') ||
+      const queueBusy = error instanceof QueueBusyError;
+      const message = queueBusy || error.message.startsWith('A conversão excedeu') ||
         error.message.startsWith('O LibreOffice')
         ? error.message : 'Não foi possível converter o arquivo. Tente novamente.';
-      res.status(500).json({ error: message });
+      res.status(queueBusy ? 503 : 500).json({ error: message });
     } else if (!res.destroyed) {
       res.destroy();
     }
-    if (!controller.signal.aborted) console.error('Falha na conversão:', error.message);
+    if (!controller.signal.aborted && !(error instanceof QueueBusyError)) console.error('Falha na conversão:', error.message);
   } finally {
     res.removeListener('close', onClose);
     if (req.file) delete req.file.buffer;
