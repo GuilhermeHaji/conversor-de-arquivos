@@ -1,12 +1,12 @@
 # Conversor de arquivos
 
-Plataforma web local para converter documentos, planilhas, apresentações e vídeos, e para compactar arquivos em ZIP. Feita com Node.js, LibreOffice e FFmpeg.
+Plataforma web para converter documentos, planilhas, apresentações e vídeos, e para compactar arquivos em ZIP. Feita com Node.js, LibreOffice e FFmpeg. Roda no seu computador ou publicada na internet, com HTTPS, em um servidor gratuito da Oracle Cloud.
 
 ![Interface do conversor com um vídeo selecionado e o destino "MP4 compactado" escolhido](docs/screenshot.png)
 
 ## Sobre o projeto
 
-Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar, um CSV para trabalhar com dados, um vídeo menor para enviar por mensagem. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando todo o processamento no computador em que o servidor foi iniciado.
+Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar, um CSV para trabalhar com dados, um vídeo menor para enviar por mensagem. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando todo o processamento no próprio servidor, sem serviços externos.
 
 O backend Express usa dois motores: o LibreOffice em modo headless para documentos e o FFmpeg para vídeos. Um mapa declarativo define as famílias de arquivo, os pares permitidos, os limites de tamanho e os tempos máximos de cada uma. Uma fila em memória limita a execução a duas tarefas simultâneas para controlar o uso de CPU e memória. O frontend usa apenas HTML, CSS e JavaScript; o projeto não requer banco de dados, autenticação ou serviços externos.
 
@@ -23,6 +23,7 @@ Os uploads vão direto para uma pasta temporária exclusiva da requisição e pa
 - Fila com até duas tarefas ativas e dez aguardando, com contador na interface.
 - Timeout de 60 segundos para documentos e 15 minutos para vídeos; cancelamento por desconexão.
 - Se um motor não estiver instalado, só a família dele fica indisponível; o resto continua funcionando.
+- Pronto para uso público: limite de conversões por visitante, cabeçalhos de segurança, página de privacidade (LGPD) e HTTPS automático com Caddy.
 
 ### Conversões suportadas
 
@@ -120,6 +121,33 @@ docker run --rm -p 3000:3000 conversor-de-arquivos
 
 A imagem parte de `node:22-bookworm-slim`, instala apenas Writer, Calc e Impress, roda como usuário sem privilégios e expõe a porta 3000 com `HOST=0.0.0.0`. Um `HEALTHCHECK` consulta `/status` a cada 30 segundos.
 
+### Configuração
+
+Todos os limites vêm de variáveis de ambiente. Os padrões valem para uso local; o `docker-compose.yml` de produção define valores menores para o público.
+
+| Variável | Local (padrão) | Produção | O que controla |
+| --- | --- | --- | --- |
+| `MAX_DOC_MB` | 20 | 20 | Tamanho máximo de documentos |
+| `MAX_VIDEO_MB` | 500 | 100 | Tamanho máximo de vídeos |
+| `ZIP_MAX_MB` / `ZIP_MAX_FILES` | 200 / 20 | 100 / 20 | Limites da compactação em ZIP |
+| `MAX_CONCURRENT` | 2 | 2 | Tarefas executando ao mesmo tempo no servidor |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MIN` | desligado / 10 | 20 / 10 | Conversões por visitante numa janela de minutos |
+| `MAX_ACTIVE_PER_IP` | desligado | 2 | Conversões simultâneas por visitante |
+| `TRUST_PROXY` | 0 | 1 | Proxies confiáveis na frente do servidor (para identificar o IP real) |
+| `HOST` / `PORT` | 127.0.0.1 / 3000 | 0.0.0.0 / 3000 | Endereço e porta do servidor |
+
+Um valor inválido (por exemplo, `MAX_VIDEO_MB=cem`) impede o servidor de iniciar, com uma mensagem indicando a variável.
+
+### Publicação na internet
+
+O guia completo, passo a passo, está em **[DEPLOY.md](DEPLOY.md)**: criar o servidor gratuito na Oracle Cloud, apontar o domínio no Registro.br e instalar tudo com um comando:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GuilhermeHaji/conversor-de-arquivos/main/deploy/instalar.sh | bash -s -- seudominio.com.br
+```
+
+Em produção, o `docker-compose.yml` sobe dois containers: o **Caddy**, que atende nas portas 80 e 443 e obtém e renova o certificado HTTPS sozinho, e o **conversor**, acessível apenas pelo Caddy. Para atualizar o site depois de mudanças no GitHub: `bash ~/conversor-de-arquivos/deploy/atualizar.sh`.
+
 ### Testes automatizados
 
 ```sh
@@ -128,7 +156,7 @@ npm test
 
 Os testes também rodam automaticamente no GitHub Actions a cada push e pull request, em Linux e Windows (`.github/workflows/testes.yml`).
 
-São 94 testes com o runner nativo do Node e o fluxo HTTP real, com os processos do LibreOffice e do FFmpeg simulados. Cobrem todos os pares de conversão, `/formats`, os argumentos passados a cada motor (incluindo o leitor forçado do FFmpeg), limites por tipo, recusa antecipada pelo `Content-Length`, validação de conteúdo (incluindo CSV binário e playlist disfarçada de vídeo), nomes maliciosos, ZIP com nomes duplicados, erros, timeouts de 60 segundos e 15 minutos, desconexões, fila e limpeza dos temporários. Não exigem LibreOffice nem FFmpeg e não verificam a fidelidade visual das conversões; use o teste manual abaixo para isso.
+São 100 testes com o runner nativo do Node e o fluxo HTTP real, com os processos do LibreOffice e do FFmpeg simulados. Cobrem todos os pares de conversão, `/formats`, os argumentos passados a cada motor (incluindo o leitor forçado do FFmpeg), limites por tipo, recusa antecipada pelo `Content-Length`, validação de conteúdo (incluindo CSV binário e playlist disfarçada de vídeo), nomes maliciosos, ZIP com nomes duplicados, erros, timeouts de 60 segundos e 15 minutos, desconexões, fila, limpeza dos temporários, limite por visitante, cabeçalhos de segurança e leitura da configuração. Não exigem LibreOffice nem FFmpeg e não verificam a fidelidade visual das conversões; use o teste manual abaixo para isso.
 
 ### Teste manual
 
@@ -155,7 +183,8 @@ A rota cria uma pasta com UUID para a requisição e grava o upload nela, com no
 
 ```text
 src/
-  server.js              inicialização e verificação dos motores
+  server.js              inicialização, verificação dos motores e limpeza de sobras
+  app.js                 montagem da aplicação (rotas, proteções, arquivos estáticos)
   routes/convert.js      POST /convert
   routes/zip.js          POST /zip
   routes/formats.js      GET /formats
@@ -164,17 +193,28 @@ src/
   services/converter.js  execução do LibreOffice e do FFmpeg
   services/queue.js      fila em memória
   services/uploads.js    upload em disco, temporários e nomes seguros
+  services/config.js     limites lidos das variáveis de ambiente
+  services/protection.js limite por visitante e cabeçalhos de segurança
 public/
   index.html
+  privacidade.html       privacidade e termos de uso (LGPD)
   style.css
   app.js
 test/
   conversion.test.js
   queue.test.js
+  protection.test.js
 docs/
   screenshot.png
 .github/workflows/
   testes.yml
+deploy/
+  Caddyfile              HTTPS automático e limite de upload
+  instalar.sh            instalação no servidor com um comando
+  atualizar.sh           atualização a partir do GitHub
+docker-compose.yml       produção: conversor + Caddy
+DEPLOY.md                guia de publicação na Oracle Cloud
+.env.example
 Dockerfile
 .dockerignore
 package.json
@@ -225,6 +265,7 @@ Respostas de `/convert` e `/zip`:
 - **200:** arquivo para download.
 - **400:** upload ausente ou inválido, formato não suportado, tamanho excedido, destino ausente ou não permitido, conteúdo incompatível. JSON `{ "error": "mensagem" }`. Quando o `Content-Length` já indica um upload acima do limite, a recusa acontece antes de receber o corpo.
 - **500:** falha do motor, ausência do arquivo de saída ou timeout. JSON no mesmo formato.
+- **429:** limite de conversões por visitante atingido (só quando ligado).
 - **503:** fila cheia ou tempo de espera excedido. JSON `{ "error": "Servidor ocupado no momento. Tente novamente em instantes." }`.
 
 ### Processamento e segurança
@@ -249,6 +290,8 @@ O `-f` força o leitor correspondente à extensão validada (`mov` para MP4/MOV,
 
 Ambos os motores são iniciados com `spawn`, argumentos em array e `shell: false`. No timeout, o serviço encerra a árvore do processo (`taskkill /T /F` no Windows, grupo de processos em sistemas POSIX) e retorna 500. A saída deve existir com a extensão esperada e tamanho maior que zero.
 
+Para uso público, cada visitante (identificado pelo IP) tem um limite de conversões numa janela de tempo e de conversões simultâneas; acima disso, a resposta é **429** com uma mensagem explicando. Atrás do Caddy, o IP vem do cabeçalho `X-Forwarded-For`, que o Caddy reescreve, então um visitante não consegue se passar por outro. Todas as páginas saem com uma política de segurança de conteúdo (CSP) que só permite recursos do próprio site, além de `X-Frame-Options`, `nosniff` e `Referrer-Policy`. Ao iniciar, o servidor apaga pastas temporárias que tenham sobrado de uma queda anterior.
+
 A limpeza fica em `finally`, depois que o processo termina e que o envio do arquivo conclui ou falha. Remove upload, saída e perfil em sucesso, erro, timeout e desconexão, inclusive quando o upload é interrompido no meio. Interrupção forçada do Node ou desligamento da máquina não executam `finally`.
 
 ## Roadmap
@@ -257,7 +300,7 @@ A limpeza fica em `finally`, depois que o processo termina e que o envio do arqu
 - Áudio (MP3, WAV, OGG) e extração do áudio de vídeos.
 - Extrair ZIP e converter os arquivos de dentro em lote.
 - PDF como formato de entrada (PDF → DOCX).
-- Deploy público com HTTPS, limite de requisições por IP e verificação antivírus.
+- Publicação automática no servidor a cada commit (GitHub Actions + SSH).
 
 ## Licença
 

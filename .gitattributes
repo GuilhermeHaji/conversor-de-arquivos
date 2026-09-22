@@ -1,0 +1,8 @@
+# Scripts e configurações do servidor precisam de quebras de linha no padrão Linux.
+*.sh text eol=lf
+deploy/Caddyfile text eol=lf
+docker-compose.yml text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf
+# Scripts do Windows no padrão Windows.
+*.cmd text eol=crlf

@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Conversor local de arquivos</title>
+  <title>Conversor de arquivos</title>
+  <meta name="description" content="Converta documentos, planilhas, apresentações e vídeos, ou junte arquivos em ZIP. Grátis, sem cadastro, com os arquivos apagados logo após a conversão.">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <main>
-    <div class="brand"><span class="brand-icon" aria-hidden="true">↗</span> Conversor local</div>
+    <div class="brand"><a class="brand-link" href="/"><span class="brand-icon" aria-hidden="true">↗</span> Conversor</a></div>
     <section class="converter" aria-labelledby="title">
-      <p class="eyebrow">SIMPLES. DIRETO. NO SEU COMPUTADOR.</p>
+      <p class="eyebrow">SIMPLES. RÁPIDO. SEM CADASTRO.</p>
       <h1 id="title">Seu arquivo,<br>em outro <span>formato.</span></h1>
       <p class="intro">Converta documentos, planilhas, apresentações e vídeos, ou junte vários arquivos em um ZIP.</p>
       <form id="convert-form">
@@ -38,9 +39,9 @@
         <p id="status" class="status" role="status" aria-live="polite"></p>
         <p id="error" class="error" role="alert" hidden></p>
       </form>
-      <p class="privacy">Processamento local. Arquivos temporários apagados após a conversão.</p>
+      <p class="privacy">Seus arquivos são apagados logo após a conversão. Nada é guardado. <a href="/privacidade">Privacidade e termos</a></p>
     </section>
-    <footer>Conversor local de arquivos <span>LibreOffice · FFmpeg</span></footer>
+    <footer>Conversor de arquivos <span><a href="/privacidade">Privacidade e termos</a> · <a href="https://github.com/GuilhermeHaji/conversor-de-arquivos">Código no GitHub</a></span></footer>
   </main>
 </body>
 </html>

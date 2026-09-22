@@ -1,13 +1,13 @@
 // Fonte única dos formatos: famílias, entradas aceitas, destinos e pares permitidos.
-const MB = 1024 * 1024;
+import { config } from './config.js';
 
 export const families = {
-  office: { label: 'Documentos', engine: 'libreoffice', maxBytes: 20 * MB, timeoutMs: 60_000 },
-  video: { label: 'Vídeos', engine: 'ffmpeg', maxBytes: 500 * MB, timeoutMs: 15 * 60_000 },
+  office: { label: 'Documentos', engine: 'libreoffice', maxBytes: config.maxDocumentBytes, timeoutMs: 60_000 },
+  video: { label: 'Vídeos', engine: 'ffmpeg', maxBytes: config.maxVideoBytes, timeoutMs: 15 * 60_000 },
 };
 
 // Limites da compactação em ZIP (qualquer tipo de arquivo).
-export const zipLimits = { maxFiles: 20, maxTotalBytes: 200 * MB };
+export const zipLimits = { maxFiles: config.zipMaxFiles, maxTotalBytes: config.zipMaxTotalBytes };
 
 // Maior upload aceito em uma única requisição de conversão.
 export const MAX_UPLOAD_BYTES = Math.max(...Object.values(families).map((family) => family.maxBytes));

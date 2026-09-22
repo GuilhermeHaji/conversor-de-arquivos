@@ -1,0 +1,19 @@
+# Caddy: HTTPS automático (Let's Encrypt) para o domínio definido no .env.
+
+{$DOMINIO} {
+	encode zstd gzip
+
+	# Recusa uploads acima do limite antes de chegarem ao conversor.
+	request_body {
+		max_size {$LIMITE_UPLOAD}
+	}
+
+	header Strict-Transport-Security "max-age=31536000"
+
+	reverse_proxy conversor:3000
+}
+
+# Quem digitar www. é levado para o endereço principal.
+www.{$DOMINIO} {
+	redir https://{$DOMINIO}{uri} permanent
+}

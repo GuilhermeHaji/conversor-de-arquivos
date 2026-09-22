@@ -1,4 +1,6 @@
-export const MAX_CONCURRENT = 2;
+import { config } from './config.js';
+
+export const MAX_CONCURRENT = config.maxConcurrent;
 export const MAX_WAITING = 10;
 // Vídeos podem levar minutos; a espera na fila acompanha esse tempo.
 export const MAX_WAIT_MS = 10 * 60_000;
