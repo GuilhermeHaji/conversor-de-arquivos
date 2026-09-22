@@ -13,32 +13,34 @@
     <section class="converter" aria-labelledby="title">
       <p class="eyebrow">SIMPLES. DIRETO. NO SEU COMPUTADOR.</p>
       <h1 id="title">Seu arquivo,<br>em outro <span>formato.</span></h1>
-      <p class="intro">Converta documentos, planilhas e apresentações em poucos cliques.</p>
+      <p class="intro">Converta documentos, planilhas, apresentações e vídeos, ou junte vários arquivos em um ZIP.</p>
       <form id="convert-form">
         <div id="drop-zone" class="drop-zone">
-          <div class="document-icon" aria-hidden="true">ARQUIVO <span>→ CONVERTER</span></div>
-          <p class="drop-title">Arraste seu arquivo até aqui</p>
+          <div class="document-icon" aria-hidden="true">ARQUIVOS <span>→ CONVERTER</span></div>
+          <p class="drop-title">Arraste seus arquivos até aqui</p>
           <p class="drop-alternative">ou</p>
-          <button id="select-button" class="select-button" type="button">Selecionar arquivo</button>
-          <!-- O atributo accept é preenchido com os formatos retornados pela API. -->
-          <input id="file-input" type="file" accept="" hidden>
-          <p id="file-limit" class="file-limit">Carregando formatos · Até 20 MB</p>
+          <button id="select-button" class="select-button" type="button">Selecionar arquivos</button>
+          <input id="file-input" type="file" multiple hidden>
+          <p id="file-limit" class="file-limit">Carregando formatos…</p>
         </div>
         <p id="file-name" class="file-name" aria-live="polite">Nenhum arquivo selecionado</p>
         <div id="target-field" class="target-field" hidden>
-          <label for="target-format">Formato de destino</label>
+          <label for="target-format">Converter para</label>
           <select id="target-format" name="to"></select>
         </div>
         <button id="convert-button" class="convert-button" type="submit" disabled>
           <span id="spinner" class="spinner" aria-hidden="true" hidden></span>
           <span id="button-label">Converter arquivo</span>
         </button>
+        <div id="progress" class="progress" hidden>
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
         <p id="status" class="status" role="status" aria-live="polite"></p>
         <p id="error" class="error" role="alert" hidden></p>
       </form>
       <p class="privacy">Processamento local. Arquivos temporários apagados após a conversão.</p>
     </section>
-    <footer>Conversor local de arquivos <span>Conversão com LibreOffice</span></footer>
+    <footer>Conversor local de arquivos <span>LibreOffice · FFmpeg</span></footer>
   </main>
 </body>
 </html>

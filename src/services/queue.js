@@ -1,6 +1,7 @@
 export const MAX_CONCURRENT = 2;
 export const MAX_WAITING = 10;
-export const MAX_WAIT_MS = 90_000;
+// Vídeos podem levar minutos; a espera na fila acompanha esse tempo.
+export const MAX_WAIT_MS = 10 * 60_000;
 
 export class QueueBusyError extends Error {
   constructor() {

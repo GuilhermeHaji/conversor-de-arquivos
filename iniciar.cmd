@@ -55,13 +55,19 @@ if errorlevel 1 echo Nao foi possivel enviar para o GitHub agora. O commit local
 :verificar
 
 echo.
-echo === 3/4 Verificando Node e LibreOffice ===
+echo === 3/4 Verificando Node, dependencias e LibreOffice ===
 where node >nul 2>&1
 if errorlevel 1 goto semnode
 node --version
+echo Instalando/atualizando dependencias (na primeira vez baixa o FFmpeg, pode demorar um pouco)...
+call npm.cmd install --no-audit --no-fund
+if errorlevel 1 echo Aviso: o npm install falhou. Os videos podem ficar indisponiveis; copie a mensagem acima e envie ao Claude.
 where soffice >nul 2>&1
-if errorlevel 1 goto semsoffice
-echo LibreOffice encontrado no PATH.
+if errorlevel 1 (
+  echo Aviso: LibreOffice nao encontrado no PATH. Documentos ficarao indisponiveis; videos e ZIP continuam funcionando.
+) else (
+  echo LibreOffice encontrado no PATH.
+)
 
 echo.
 echo === 4/4 Iniciando o servidor ===
@@ -73,13 +79,13 @@ taskkill /PID %PID3000% /F >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 :subir
-start "Conversor DOCX para PDF - feche esta janela para parar" cmd /k npm.cmd start
-timeout /t 5 /nobreak >nul
+start "Conversor de Arquivos - feche esta janela para parar" cmd /k npm.cmd start
+timeout /t 6 /nobreak >nul
 start "" http://localhost:3000
 echo.
 echo Pronto! O site abriu no navegador em http://localhost:3000
-echo Teste arrastando um arquivo .docx e clicando em "Converter para PDF".
-echo Para parar o servidor, feche a janela "Conversor DOCX para PDF".
+echo Arraste documentos ou videos para converter, ou varios arquivos para juntar em ZIP.
+echo Para parar o servidor, feche a janela "Conversor de Arquivos".
 echo.
 pause
 exit /b 0
@@ -98,11 +104,5 @@ exit /b 1
 
 :semnode
 echo Node.js nao encontrado. Instale a versao LTS em https://nodejs.org e rode este arquivo de novo.
-pause
-exit /b 1
-
-:semsoffice
-echo O comando soffice (LibreOffice) nao foi encontrado no PATH.
-echo Reinicie o computador e tente de novo. Se continuar, avise o Claude.
 pause
 exit /b 1

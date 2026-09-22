@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { formats } from '../services/formats.js';
+import { publicFormats } from '../services/formats.js';
 
 const router = Router();
-router.get('/', (req, res) => res.json(formats));
+router.get('/', (req, res) => res.json(publicFormats()));
 
 export default router;

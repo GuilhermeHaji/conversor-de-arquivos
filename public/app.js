@@ -11,14 +11,42 @@ const errorBox = document.querySelector('#error');
 const targetField = document.querySelector('#target-field');
 const targetSelect = document.querySelector('#target-format');
 const fileLimit = document.querySelector('#file-limit');
-let selectedFile = null;
+const progress = document.querySelector('#progress');
+const progressBar = document.querySelector('#progress-bar');
+
+// "zip" é tratado só no navegador: envia para /zip em vez de /convert.
+const ZIP_OPTION = 'zip';
+const FAMILY_NAMES = { office: 'documentos', video: 'vídeos' };
+let selectedFiles = [];
 let busy = false;
 let formatsPromise;
 let selectionVersion = 0;
 
+function formatMB(bytes) {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+// Tamanho de um arquivo escolhido: KB abaixo de 1 MB, MB com uma casa acima disso.
+function formatSize(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+}
+
 function showError(message) {
   errorBox.textContent = message;
   errorBox.hidden = false;
+}
+
+function describeLimits({ formatos, zip }) {
+  const byFamily = {};
+  for (const entry of Object.values(formatos)) {
+    byFamily[entry.family] ??= { maxBytes: entry.maxBytes, extensions: [] };
+    byFamily[entry.family].extensions.push(entry.extension.toUpperCase());
+  }
+  const parts = Object.entries(byFamily).map(([family, { maxBytes, extensions }]) =>
+    `${extensions.join(', ')} até ${formatMB(maxBytes)}`);
+  parts.push(`ZIP: qualquer arquivo, até ${zip.maxFiles} por vez (${formatMB(zip.maxTotalBytes)} no total)`);
+  return parts.join(' · ');
 }
 
 function loadFormats() {
@@ -26,10 +54,9 @@ function loadFormats() {
   if (!formatsPromise) {
     formatsPromise = fetch('/formats').then(async (response) => {
       if (!response.ok) throw new Error('Não foi possível carregar os formatos. Selecione o arquivo para tentar novamente.');
-      const formats = await response.json();
-      fileInput.accept = Object.values(formats).flatMap(({ extension, mime }) => [`.${extension}`, mime]).join(',');
-      fileLimit.textContent = `${Object.keys(formats).map((ext) => ext.toUpperCase()).join(', ')} · Até 20 MB`;
-      return formats;
+      const data = await response.json();
+      fileLimit.textContent = describeLimits(data);
+      return data;
     }).catch((error) => {
       formatsPromise = null;
       throw error;
@@ -38,41 +65,79 @@ function loadFormats() {
   return formatsPromise;
 }
 
-function updateButton() {
-  buttonLabel.textContent = busy ? 'Convertendo...'
-    : targetSelect.value ? `Converter para ${targetSelect.value.toUpperCase()}` : 'Converter arquivo';
+function selectedOptionLabel() {
+  return targetSelect.selectedOptions[0]?.dataset.short ?? '';
 }
 
-async function selectFile(files) {
-  if (busy || !files.length) return;
-  const version = ++selectionVersion;
-  selectedFile = null;
+function updateButton() {
+  if (busy) return;
+  const value = targetSelect.value;
+  buttonLabel.textContent = !value ? 'Converter arquivo'
+    : value === ZIP_OPTION ? 'Compactar em ZIP' : `Converter para ${selectedOptionLabel()}`;
+}
+
+function addOption(value, label, short = label) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  option.dataset.short = short;
+  targetSelect.append(option);
+}
+
+function resetSelection() {
+  selectedFiles = [];
   convertButton.disabled = true;
   targetField.hidden = true;
   targetSelect.replaceChildren();
-  updateButton();
   errorBox.hidden = true;
   status.textContent = '';
   fileName.textContent = 'Nenhum arquivo selecionado';
+  updateButton();
+}
 
-  if (files.length !== 1) return showError('Selecione somente um arquivo por vez.');
-  const file = files[0];
-  if (file.size > 20 * 1024 * 1024) return showError('O arquivo excede o tamanho máximo de 20 MB.');
+async function selectFiles(files) {
+  if (busy || !files.length) return;
+  const version = ++selectionVersion;
+  resetSelection();
 
   try {
-    const formats = await loadFormats();
+    const { formatos, zip } = await loadFormats();
     // Uma resposta atrasada não deve sobrescrever uma seleção mais recente.
     if (version !== selectionVersion) return;
-    const extension = file.name.match(/\.([^.]+)$/)?.[1].toLowerCase();
-    if (!Object.hasOwn(formats, extension)) return showError('Formato de entrada não suportado. Escolha um dos formatos indicados.');
-    for (const target of formats[extension].outputs) {
-      const option = document.createElement('option');
-      option.value = target;
-      option.textContent = target.toUpperCase();
-      targetSelect.append(option);
+
+    const total = files.reduce((sum, file) => sum + file.size, 0);
+    const zipAllowed = files.length <= zip.maxFiles && total <= zip.maxTotalBytes;
+
+    if (files.length > 1) {
+      if (!zipAllowed) {
+        return showError(`Para compactar, selecione até ${zip.maxFiles} arquivos somando até ${formatMB(zip.maxTotalBytes)}.`);
+      }
+      addOption(ZIP_OPTION, `ZIP (juntar os ${files.length} arquivos)`, 'ZIP');
+      fileName.textContent = `${files.length} arquivos selecionados · ${formatSize(total)}`;
+    } else {
+      const file = files[0];
+      const extension = file.name.match(/\.([^.]+)$/)?.[1].toLowerCase();
+      const entry = extension && Object.hasOwn(formatos, extension) ? formatos[extension] : null;
+      const fitsConversion = entry && file.size <= entry.maxBytes;
+
+      if (fitsConversion) {
+        for (const output of entry.outputs) addOption(output.id, output.label, output.label.split(' (')[0]);
+      }
+      if (zipAllowed) addOption(ZIP_OPTION, 'ZIP (compactar o arquivo)', 'ZIP');
+
+      if (!targetSelect.options.length) {
+        return showError(entry
+          ? `O arquivo excede o tamanho máximo de ${formatMB(entry.maxBytes)} para ${FAMILY_NAMES[entry.family] ?? 'este tipo'}.`
+          : `O arquivo excede o tamanho máximo de ${formatMB(zip.maxTotalBytes)}.`);
+      }
+      if (!entry) status.textContent = 'Este formato não tem conversão disponível, mas você pode compactá-lo em ZIP.';
+      else if (!fitsConversion) {
+        status.textContent = `Grande demais para converter (limite de ${formatMB(entry.maxBytes)}), mas dá para compactar em ZIP.`;
+      }
+      fileName.textContent = `${file.name} · ${formatSize(file.size)}`;
     }
-    selectedFile = file;
-    fileName.textContent = file.name;
+
+    selectedFiles = files;
     targetField.hidden = false;
     convertButton.disabled = false;
     updateButton();
@@ -85,7 +150,7 @@ loadFormats().catch(() => showError('Não foi possível carregar os formatos. Se
 targetSelect.addEventListener('change', updateButton);
 selectButton.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
-  selectFile([...fileInput.files]);
+  selectFiles([...fileInput.files]);
   fileInput.value = '';
 });
 for (const eventName of ['dragenter', 'dragover']) {
@@ -100,31 +165,37 @@ dropZone.addEventListener('dragleave', (event) => {
 dropZone.addEventListener('drop', (event) => {
   event.preventDefault();
   dropZone.classList.remove('dragging');
-  selectFile([...event.dataTransfer.files]);
+  selectFiles([...event.dataTransfer.files]);
 });
 
-function setBusy(value) {
+function setBusy(value, label) {
   busy = value;
   selectButton.disabled = value;
   fileInput.disabled = value;
   targetSelect.disabled = value;
-  convertButton.disabled = value || !selectedFile || !targetSelect.value;
+  convertButton.disabled = value || !selectedFiles.length || !targetSelect.value;
   spinner.hidden = !value;
-  updateButton();
   form.setAttribute('aria-busy', String(value));
+  if (value) buttonLabel.textContent = label;
+  else updateButton();
 }
 
-function getDownloadName(response, fallback) {
-  const header = response.headers.get('Content-Disposition') || '';
-  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+function setProgress(fraction) {
+  progress.hidden = fraction === null;
+  progressBar.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
+}
+
+function getDownloadName(header, fallback) {
+  const value = header || '';
+  const utf8 = value.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8) {
     try { return decodeURIComponent(utf8[1]); } catch { /* Usa o nome de reserva. */ }
   }
-  const quoted = header.match(/filename="((?:\\.|[^"\\])*)"/i);
+  const quoted = value.match(/filename="((?:\\.|[^"\\])*)"/i);
   return quoted ? quoted[1].replace(/\\(.)/g, '$1') : fallback;
 }
 
-function startStatusPolling() {
+function startStatusPolling(working) {
   const controller = new AbortController();
   let stopped = false;
   let inFlight = false;
@@ -135,9 +206,8 @@ function startStatusPolling() {
       const response = await fetch('/status', { signal: controller.signal, cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json();
-      if (!stopped && busy) {
-        status.textContent = data.aguardando > 0
-          ? `Convertendo... (${data.aguardando} na fila)` : 'Convertendo... Aguarde a conclusão.';
+      if (!stopped && busy && progress.hidden) {
+        status.textContent = data.aguardando > 0 ? `${working} (${data.aguardando} na fila)` : `${working} Aguarde a conclusão.`;
       }
     } catch { /* Uma falha na consulta de status não interrompe a conversão. */ }
     finally { inFlight = false; }
@@ -151,42 +221,74 @@ function startStatusPolling() {
   };
 }
 
+// XMLHttpRequest permite mostrar o progresso do envio, importante para vídeos grandes.
+function send(url, body, working) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.responseType = 'blob';
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) return;
+      setProgress(event.loaded / event.total);
+      status.textContent = `Enviando... ${Math.round((event.loaded / event.total) * 100)}%`;
+    });
+    xhr.upload.addEventListener('load', () => {
+      setProgress(null);
+      status.textContent = `${working} Aguarde a conclusão.`;
+    });
+    xhr.addEventListener('load', async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        return resolve({ blob: xhr.response, disposition: xhr.getResponseHeader('Content-Disposition') });
+      }
+      const data = await xhr.response?.text().then(JSON.parse).catch(() => ({}));
+      reject(new Error(data?.error || 'Não foi possível concluir. Tente novamente.'));
+    });
+    xhr.addEventListener('error', () => reject(new Error('Não foi possível acessar o servidor. Verifique se ele está em execução.')));
+    xhr.send(body);
+  });
+}
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Dá tempo ao navegador para iniciar o download antes de liberar o objeto.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!selectedFile || !targetSelect.value || busy) return;
-  const targetFormat = targetSelect.value;
+  if (!selectedFiles.length || !targetSelect.value || busy) return;
+  const target = targetSelect.value;
+  const isZip = target === ZIP_OPTION;
+  const short = selectedOptionLabel();
+  const working = isZip ? 'Compactando...' : 'Convertendo...';
   errorBox.hidden = true;
-  status.textContent = 'Convertendo... Aguarde a conclusão.';
-  setBusy(true);
-  const stopStatusPolling = startStatusPolling();
+  status.textContent = 'Enviando...';
+  setBusy(true, isZip ? 'Compactando...' : 'Convertendo...');
+  const stopStatusPolling = startStatusPolling(working);
 
   try {
     const body = new FormData();
-    body.append('file', selectedFile);
-    body.append('to', targetFormat);
-    const response = await fetch('/convert', { method: 'POST', body });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || 'Não foi possível converter o arquivo. Tente novamente.');
+    if (isZip) selectedFiles.forEach((file) => body.append('files', file));
+    else {
+      body.append('file', selectedFiles[0]);
+      body.append('to', target);
     }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = getDownloadName(response, selectedFile.name.replace(/\.[^.]+$/, `.${targetFormat}`));
-    document.body.append(link);
-    link.click();
-    link.remove();
-    // Dá tempo ao navegador para iniciar o download antes de liberar o objeto.
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    status.textContent = `${targetFormat.toUpperCase()} pronto! O download foi iniciado.`;
+    const { blob, disposition } = await send(isZip ? '/zip' : '/convert', body, working);
+    const fallback = isZip ? 'arquivos.zip' : selectedFiles[0].name.replace(/\.[^.]+$/, '') + '.' + target;
+    download(blob, getDownloadName(disposition, fallback));
+    status.textContent = `${short} pronto! O download foi iniciado.`;
   } catch (error) {
     status.textContent = '';
-    showError(error instanceof TypeError
-      ? 'Não foi possível acessar o servidor. Verifique se ele está em execução.'
-      : error.message);
+    showError(error.message);
   } finally {
     stopStatusPolling();
+    setProgress(null);
     setBusy(false);
   }
 });

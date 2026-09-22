@@ -1,46 +1,67 @@
 # Conversor de arquivos
 
-Plataforma web local para converter documentos, planilhas e apresentações com Node.js e LibreOffice.
+Plataforma web local para converter documentos, planilhas, apresentações e vídeos, e para compactar arquivos em ZIP. Feita com Node.js, LibreOffice e FFmpeg.
 
-![Interface do conversor com um arquivo selecionado e o destino PDF escolhido](docs/screenshot.png)
+![Interface do conversor com um vídeo selecionado e o destino "MP4 compactado" escolhido](docs/screenshot.png)
 
 ## Sobre o projeto
 
-Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar ou um CSV para trabalhar com dados. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando o processamento no computador em que o servidor foi iniciado.
+Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar, um CSV para trabalhar com dados, um vídeo menor para enviar por mensagem. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando todo o processamento no computador em que o servidor foi iniciado.
 
-O backend Express usa o LibreOffice em modo headless e centraliza os pares permitidos em um mapa declarativo. Uma fila em memória limita a execução a duas conversões simultâneas para controlar o uso de CPU e memória. O frontend usa apenas HTML, CSS e JavaScript; o projeto não requer banco de dados, autenticação ou serviços externos.
+O backend Express usa dois motores: o LibreOffice em modo headless para documentos e o FFmpeg para vídeos. Um mapa declarativo define as famílias de arquivo, os pares permitidos, os limites de tamanho e os tempos máximos de cada uma. Uma fila em memória limita a execução a duas tarefas simultâneas para controlar o uso de CPU e memória. O frontend usa apenas HTML, CSS e JavaScript; o projeto não requer banco de dados, autenticação ou serviços externos.
 
-Os uploads passam por validação de extensão, conteúdo real e tamanho antes de entrar na fila. Cada conversão recebe uma pasta com UUID e um perfil isolado do LibreOffice. O processo é iniciado sem shell, com argumentos separados, tem timeout e é cancelado quando o cliente desconecta. A limpeza dos arquivos temporários fica em `finally`, inclusive nos caminhos de erro.
+Os uploads vão direto para uma pasta temporária exclusiva da requisição e passam por validação de extensão, tamanho e conteúdo real antes de entrar na fila. Os motores são iniciados sem shell, com argumentos separados, têm timeout e são cancelados quando o cliente desconecta. No FFmpeg, o leitor de entrada é forçado de acordo com a extensão validada e só arquivos locais podem ser lidos. A limpeza dos temporários fica em `finally`, inclusive nos caminhos de erro.
 
 ## Funcionalidades
 
-- Upload por seleção ou arrastar e soltar, com limite de 20 MB por arquivo.
+- Upload por seleção ou arrastar e soltar, com barra de progresso do envio.
 - Destinos disponíveis conforme o formato de entrada, consultados na API.
-- Validação do conteúdo real com `file-type`.
+- Vários arquivos de uma vez (ou qualquer arquivo sem conversão disponível) viram um ZIP.
+- Limite de tamanho por tipo: documentos até 20 MB, vídeos até 500 MB, ZIP até 20 arquivos e 200 MB no total.
+- Validação do conteúdo real com `file-type` (e de texto UTF-8 para CSV).
 - Download automático, preservando o nome original com a nova extensão.
-- Fila com até duas conversões ativas, dez aguardando e espera máxima de 90 segundos.
-- Indicador de processamento e contador da fila atualizado a cada dois segundos.
-- Timeout de 60 segundos por conversão e cancelamento por desconexão.
-- Mensagens de erro do backend exibidas na interface.
+- Fila com até duas tarefas ativas e dez aguardando, com contador na interface.
+- Timeout de 60 segundos para documentos e 15 minutos para vídeos; cancelamento por desconexão.
+- Se um motor não estiver instalado, só a família dele fica indisponível; o resto continua funcionando.
 
 ### Conversões suportadas
 
-| Entrada | Saídas permitidas |
+| Entrada | Saídas |
 | --- | --- |
-| DOCX | PDF, ODT |
-| ODT | PDF, DOCX |
-| XLSX | PDF, CSV |
-| PPTX | PDF |
+| DOCX | PDF, ODT, TXT, HTML |
+| ODT | PDF, DOCX, TXT |
+| XLSX | PDF, CSV, ODS |
+| ODS | XLSX, PDF, CSV |
+| CSV | XLSX, ODS, PDF |
+| PPTX | PDF, ODP |
+| ODP | PPTX, PDF |
+| MP4 | MP4 compactado, WEBM, GIF, MOV |
+| MOV | MP4, MP4 compactado, WEBM, GIF |
+| WEBM | MP4, MP4 compactado, GIF |
+| MKV | MP4, MP4 compactado, WEBM, GIF |
+| AVI | MP4, MP4 compactado, WEBM, GIF |
+| Qualquer arquivo (um ou vários) | ZIP |
 
-PDF não é aceito como entrada. O mapa em `src/services/formats.js` é a fonte única dos pares permitidos, das extensões, dos MIME esperados e dos argumentos de exportação.
+Detalhes das saídas de vídeo:
+
+- **MP4**: H.264 + AAC, otimizado para reprodução na web (`+faststart`).
+- **MP4 compactado**: reduz a resolução para no máximo 1280 px de largura e aumenta a compressão. Num teste com um vídeo de 20,8 MB em 1080p, o resultado teve 1,3 MB.
+- **WEBM**: VP9 + Opus.
+- **GIF**: primeiros 15 segundos, 10 quadros por segundo, 480 px de largura, com paleta de cores otimizada.
+
+CSV contém somente a primeira aba e os valores das células, em UTF-8, separado por vírgulas. HTML gerado a partir de DOCX traz as imagens embutidas no próprio arquivo.
+
+O mapa em `src/services/formats.js` é a fonte única das famílias, dos pares permitidos, dos limites e dos argumentos de cada motor.
 
 ## Tecnologias
 
 - Node.js 22 ou superior, com módulos ES.
 - Express para o servidor HTTP e as rotas.
-- LibreOffice headless como motor de conversão.
-- multer para receber uploads multipart.
+- LibreOffice headless como motor de documentos.
+- FFmpeg como motor de vídeo, instalado automaticamente pelo pacote `ffmpeg-static`.
+- multer para receber uploads multipart direto em disco.
 - file-type para identificar o formato pelo conteúdo.
+- yazl para gerar arquivos ZIP.
 - HTML, CSS e JavaScript puros no frontend.
 - Runner de testes nativo do Node.js, sem framework adicional.
 
@@ -49,7 +70,9 @@ PDF não é aceito como entrada. O mapa em `src/services/formats.js` é a fonte 
 ### Pré-requisitos
 
 - Node.js 22 ou superior, com npm.
-- [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) instalado e o comando `soffice` disponível no PATH.
+- [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) instalado e o comando `soffice` disponível no PATH (necessário só para documentos).
+
+O FFmpeg não precisa ser instalado: o `npm install` baixa um binário pronto para o seu sistema. Para usar outro FFmpeg, defina a variável `FFMPEG_PATH`.
 
 Confirme no mesmo terminal em que iniciará o projeto:
 
@@ -84,11 +107,11 @@ npm start
 
 Abra **http://localhost:3000**. Por padrão o servidor escuta apenas na interface local (`127.0.0.1`); as variáveis de ambiente `HOST` e `PORT` alteram isso quando necessário. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd install` e `npm.cmd start`.
 
-Ao iniciar, o servidor executa `soffice --headless --version`. Se o comando estiver ausente ou não puder ser executado, informa como instalar/configurar o LibreOffice e encerra com código 1, sem abrir a porta.
+Ao iniciar, o servidor verifica os dois motores e mostra o resultado no terminal. Se um deles faltar, a família correspondente some da página e o restante continua disponível. Se nenhum estiver disponível, o servidor encerra com código 1.
 
 ### Docker
 
-Para rodar sem instalar Node ou LibreOffice na máquina, a imagem já inclui os dois:
+Para rodar sem instalar Node ou LibreOffice na máquina, a imagem já inclui os dois (e o FFmpeg):
 
 ```sh
 docker build -t conversor-de-arquivos .
@@ -105,66 +128,49 @@ npm test
 
 Os testes também rodam automaticamente no GitHub Actions a cada push e pull request, em Linux e Windows (`.github/workflows/testes.yml`).
 
-Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Também verificam cinco conversões simultâneas com no máximo dois processos, fila cheia, espera excedida, cancelamento durante a espera e os contadores de `/status`. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
-
-Referências: [multer](https://expressjs.com/en/resources/middleware/multer/), [file-type](https://github.com/sindresorhus/file-type) e [parâmetros do LibreOffice](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html).
+São 94 testes com o runner nativo do Node e o fluxo HTTP real, com os processos do LibreOffice e do FFmpeg simulados. Cobrem todos os pares de conversão, `/formats`, os argumentos passados a cada motor (incluindo o leitor forçado do FFmpeg), limites por tipo, recusa antecipada pelo `Content-Length`, validação de conteúdo (incluindo CSV binário e playlist disfarçada de vídeo), nomes maliciosos, ZIP com nomes duplicados, erros, timeouts de 60 segundos e 15 minutos, desconexões, fila e limpeza dos temporários. Não exigem LibreOffice nem FFmpeg e não verificam a fidelidade visual das conversões; use o teste manual abaixo para isso.
 
 ### Teste manual
 
 1. Inicie o servidor e abra **http://localhost:3000**.
-2. **Texto — DOCX → ODT:** crie um documento com título, parágrafos, acentos e uma tabela. Salve como `relatório.docx`, selecione-o na página, escolha **ODT** e clique em **Converter para ODT**. Abra `relatório.odt` no Writer e confira o conteúdo.
-3. **Planilha — XLSX → CSV:** crie uma planilha com cabeçalhos e algumas linhas, incluindo acentos e um texto com vírgula. Salve como `planilha.xlsx`, selecione **CSV** e clique em **Converter para CSV**. Abra `planilha.csv` em um editor ou importe-o no Calc como UTF-8, separado por vírgulas, com aspas como delimitador de texto. Confira os valores e as colunas.
-4. **Apresentação — PPTX → PDF:** crie dois slides com títulos e textos e salve como `apresentação.pptx`. Selecione **PDF** e clique em **Converter para PDF**. Abra `apresentação.pdf` e confira se cada slide foi convertido em uma página legível.
-5. Durante cada conversão, confira **Convertendo...**, o bloqueio dos controles e o download automático ao terminar. O seletor deve mostrar somente os destinos permitidos para o arquivo selecionado.
-6. Após cada resposta, confirme que `tmp/` não contém pastas de conversão. A pasta raiz vazia pode permanecer.
-7. Renomeie um arquivo de texto para uma extensão suportada e tente convertê-lo: o backend deve rejeitar o conteúdo com HTTP 400. A interface deve mostrar a mensagem recebida.
-8. Tente um arquivo acima de 20 MB e um PDF como entrada; ambos devem ser rejeitados. Pela API, tente enviar um DOCX com `to=csv` e outra requisição sem `to`: ambas devem retornar 400.
-
-CSV contém somente a primeira aba e os valores das células, sem a formatação visual da planilha. A exportação usa UTF-8, vírgulas e aspas duplas. Esse comportamento segue o [filtro CSV do LibreOffice](https://help.libreoffice.org/latest/en-US/text/shared/guide/csv_params.html).
-
-Também é possível usar curl (no Windows, `curl.exe`):
-
-```sh
-curl --fail-with-body -F "file=@relatório.docx" -F "to=odt" http://localhost:3000/convert --output resultado.odt
-curl --fail-with-body -F "file=@planilha.xlsx" -F "to=csv" http://localhost:3000/convert --output resultado.csv
-curl --fail-with-body -F "file=@apresentação.pptx" -F "to=pdf" http://localhost:3000/convert --output resultado.pdf
-```
-
-O argumento `--output` escolhe o nome local do curl. O cabeçalho `Content-Disposition: attachment` contém o nome original com a extensão do destino. Acrescente `-D headers.txt` para inspecionar os cabeçalhos.
-
-Exemplo de validação sem confiar no MIME declarado:
-
-```sh
-curl -i -F "file=@falso.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document" -F "to=pdf" http://localhost:3000/convert
-```
-
-Se `falso.docx` contiver texto ou outro formato, a resposta será 400 mesmo com o MIME de DOCX declarado.
+2. **Documento:** selecione um DOCX, escolha **PDF** ou **TXT** e converta. Confira o arquivo baixado.
+3. **Planilha:** selecione um CSV e converta para **XLSX**. Abra no Excel ou Calc e confira colunas e acentos.
+4. **Apresentação:** converta um PPTX para **PDF** e confira uma página por slide.
+5. **Vídeo:** selecione um MP4 do celular e escolha **MP4 compactado**. Acompanhe a barra de envio e depois o "Convertendo...". Compare o tamanho do arquivo baixado com o original. Teste também **GIF**.
+6. **ZIP:** selecione três arquivos de tipos diferentes de uma vez. A única opção deve ser **ZIP**. Abra o ZIP e confira os arquivos.
+7. **Validação:** renomeie um arquivo de texto para `.mp4` e tente converter. A página deve mostrar que o conteúdo não corresponde ao formato.
+8. **Fila:** abra três abas e inicie conversões de vídeo quase ao mesmo tempo. A terceira deve mostrar "(1 na fila)".
+9. Após cada teste, confirme que a pasta `tmp/` não contém pastas de conversão.
 
 ## Arquitetura
 
 ```text
-Upload → Validação → Fila → LibreOffice → Download → Limpeza
+Upload (disco) → Validação → Fila → LibreOffice ou FFmpeg → Download → Limpeza
+                                   → ZIP (yazl)
 ```
 
-A rota recebe e valida o arquivo e o destino, grava o upload em uma pasta isolada e aguarda uma vaga na fila. O serviço de conversão executa o LibreOffice e verifica a saída. A rota envia o resultado e remove os temporários ao finalizar, inclusive quando há erro ou desconexão.
+A rota cria uma pasta com UUID para a requisição e grava o upload nela, com nome gerado pelo servidor. Depois valida extensão, tamanho, destino e conteúdo, e só então aguarda uma vaga na fila. O serviço de conversão escolhe o motor pela família do arquivo e verifica a saída. A rota envia o resultado e remove a pasta ao finalizar, inclusive quando há erro ou desconexão.
 
 ### Estrutura de pastas
 
 ```text
 src/
-  server.js
-  routes/convert.js
-  routes/formats.js
-  routes/status.js
-  services/converter.js
-  services/formats.js
-  services/queue.js
+  server.js              inicialização e verificação dos motores
+  routes/convert.js      POST /convert
+  routes/zip.js          POST /zip
+  routes/formats.js      GET /formats
+  routes/status.js       GET /status
+  services/formats.js    mapa de famílias, entradas, destinos e limites
+  services/converter.js  execução do LibreOffice e do FFmpeg
+  services/queue.js      fila em memória
+  services/uploads.js    upload em disco, temporários e nomes seguros
 public/
   index.html
   style.css
   app.js
 test/
   conversion.test.js
+  queue.test.js
 docs/
   screenshot.png
 .github/workflows/
@@ -178,7 +184,35 @@ README.md
 LICENSE
 ```
 
-### API e processamento
+### API
+
+`GET /formats` retorna os formatos disponíveis nesta máquina e os limites do ZIP:
+
+```json
+{
+  "formatos": {
+    "mp4": {
+      "extension": "mp4",
+      "family": "video",
+      "maxBytes": 524288000,
+      "outputs": [
+        { "id": "mp4-compacto", "label": "MP4 compactado (menor)", "extension": "mp4" },
+        { "id": "gif", "label": "GIF animado (primeiros 15 s)", "extension": "gif" }
+      ]
+    }
+  },
+  "zip": { "maxFiles": 20, "maxTotalBytes": 209715200 }
+}
+```
+
+O frontend monta a lista de destinos, os textos de limite e as verificações de tamanho a partir dessa resposta, sem duplicar o mapa.
+
+`POST /convert` recebe `multipart/form-data` com:
+
+- `file`: um único arquivo. A extensão e o conteúdo detectado devem corresponder à mesma entrada do mapa, e o tamanho deve respeitar o limite da família.
+- `to`: um único campo de texto com o `id` do destino, exatamente como retornado em `outputs`.
+
+`POST /zip` recebe `multipart/form-data` com um ou mais arquivos no campo `files` (até 20, somando até 200 MB). Os nomes das entradas do ZIP vêm dos nomes originais sem pastas nem caracteres proibidos; nomes repetidos recebem um sufixo como `foto (2).jpg`. Com um arquivo, o download se chama `<nome>.zip`; com vários, `arquivos.zip`.
 
 `GET /status` retorna os contadores atuais da fila, sem cache:
 
@@ -186,60 +220,44 @@ LICENSE
 { "ativas": 2, "aguardando": 3, "limite": 2 }
 ```
 
-Os números representam conversões em execução e requisições aguardando, não uploads ou downloads. Durante uma conversão, o frontend consulta essa rota a cada 2 segundos e mostra o total aguardando quando houver fila. A consulta para ao concluir ou falhar e não interfere na conversão se houver erro de rede.
+Respostas de `/convert` e `/zip`:
 
-`GET /formats` retorna o mapa completo em JSON, com as chaves `docx`, `odt`, `xlsx` e `pptx`. Cada entrada contém `extension`, `mime` e `outputs`. Exemplo do valor da chave `docx`:
-
-```json
-{
-  "extension": "docx",
-  "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "outputs": ["pdf", "odt"]
-}
-```
-
-O frontend consulta essa rota na inicialização e reutiliza a mesma promessa em cache ao selecionar arquivos. A lista de destinos e o atributo `accept` são derivados dessa resposta, sem duplicar o mapa no frontend. Uma consulta malsucedida pode ser repetida na próxima seleção.
-
-`POST /convert` recebe `multipart/form-data` com:
-
-- `file`: um único arquivo de até **20 MB (20 × 1024 × 1024 bytes)**. A extensão e o MIME detectado no conteúdo pelo `file-type` devem corresponder à mesma entrada do mapa.
-- `to`: um único campo de texto obrigatório, com o destino em minúsculas, exatamente como retornado em `outputs` (`pdf`, `odt`, `docx` ou `csv`, conforme a entrada).
-
-Respostas:
-
-- **200:** arquivo para download, preservando o nome original com a extensão do destino.
-- **400:** upload ausente ou inválido, extensão/conteúdo incompatíveis, tamanho excedido, `to` ausente ou destino não permitido. JSON `{ "error": "mensagem" }`.
-- **500:** falha do motor, ausência do arquivo de saída esperado ou timeout. JSON no mesmo formato.
+- **200:** arquivo para download.
+- **400:** upload ausente ou inválido, formato não suportado, tamanho excedido, destino ausente ou não permitido, conteúdo incompatível. JSON `{ "error": "mensagem" }`. Quando o `Content-Length` já indica um upload acima do limite, a recusa acontece antes de receber o corpo.
+- **500:** falha do motor, ausência do arquivo de saída ou timeout. JSON no mesmo formato.
 - **503:** fila cheia ou tempo de espera excedido. JSON `{ "error": "Servidor ocupado no momento. Tente novamente em instantes." }`.
 
-O upload é recebido em memória, limitado a 20 MB por requisição. Após a validação, o arquivo é escrito em `tmp/<UUID>/<UUID>.<extensão_validada>`. O nome enviado pelo usuário serve apenas para nomear o download, removendo separadores e caracteres de controle.
+### Processamento e segurança
 
-A fila em `src/services/queue.js` inicia no máximo **2 conversões simultâneas** (`MAX_CONCURRENT`), aceita até **10 requisições aguardando** (`MAX_WAITING`) e limita a espera a **90 segundos** (`MAX_WAIT_MS`). Os trabalhos aguardam em ordem de chegada. Toda a validação acontece antes de entrar na fila; arquivos inválidos não ocupam vaga. A vaga é liberada após a conversão, inclusive em caso de erro, sem esperar pelo download.
+A fila em `src/services/queue.js` inicia no máximo **2 tarefas simultâneas** (`MAX_CONCURRENT`), aceita até **10 aguardando** (`MAX_WAITING`) e limita a espera a **10 minutos** (`MAX_WAIT_MS`), para comportar vídeos longos. Os trabalhos aguardam em ordem de chegada; arquivos inválidos são recusados antes de ocupar vaga. Se o cliente desconectar enquanto aguarda, a entrada sai da fila e o motor nunca é iniciado. A fila existe somente na memória deste processo Node.
 
-Se o cliente desconectar enquanto aguarda, a entrada sai da fila e nunca inicia o LibreOffice. A limpeza no `finally` também cobre espera excedida e fila cheia. A fila existe somente na memória deste processo Node, não persiste após reinicialização e não coordena múltiplos servidores. Os 90 segundos de espera são separados do timeout de 60 segundos da conversão.
-
-Para testar a fila manualmente, abra quatro abas da página, escolha um documento em cada uma e inicie as quatro conversões em sequência rápida. Durante a sobreposição, `/status` deve mostrar no máximo duas ativas, e as páginas devem exibir o total na fila. Feche uma aba que esteja aguardando para verificar a remoção da entrada. Ao terminar todas as conversões, os contadores devem voltar a zero e `tmp/` ficar vazia. Se os arquivos converterem muito rápido, use documentos maiores, sempre respeitando 20 MB.
-
-O serviço usa `spawn` com argumentos em array e `shell: false`, com o equivalente a:
+O LibreOffice é executado com o equivalente a:
 
 ```sh
-soffice -env:UserInstallation=<URL_do_perfil_temporário> --headless --convert-to <destino_e_filtro> --outdir <pasta_temporária> <arquivo>
+soffice -env:UserInstallation=<perfil_temporário> --headless [--infilter=CSV:44,34,76,1] --convert-to <filtro> --outdir <pasta_temporária> <arquivo>
 ```
 
-Cada conversão tem perfil próprio. Após 60 segundos, o serviço encerra a árvore do processo e retorna 500. No Windows usa `taskkill /T /F`; em sistemas POSIX encerra o grupo de processos. O cliente desconectado também cancela a conversão.
+Cada conversão tem perfil próprio, o que permite duas conversões simultâneas sem conflito.
 
-O serviço expõe `convert(inputPath, outputDir, targetFormat, { signal } = {})`. O quarto argumento opcional mantém o cancelamento por desconexão. O destino é validado pelo mapa antes de executar o processo, e a saída deve existir com a extensão esperada e tamanho maior que zero.
+O FFmpeg é executado com o equivalente a:
 
-A limpeza fica em `finally`, depois que o processo termina e que o envio do arquivo conclui ou falha. Remove original, saída e perfil em sucesso, erro, timeout e desconexão. Uploads incompletos ou rejeitados não chegam a criar arquivos no disco. Interrupção forçada do Node ou desligamento da máquina não executam `finally`.
+```sh
+ffmpeg -hide_banner -nostdin -loglevel error -y -protocol_whitelist file -f <leitor> -i <arquivo> <argumentos_do_destino> <pasta_temporária>/saida.<extensão>
+```
+
+O `-f` força o leitor correspondente à extensão validada (`mov` para MP4/MOV, `matroska` para WEBM/MKV, `avi` para AVI). Isso impede que um arquivo manipulado faça o FFmpeg usar outro leitor, como o de playlists, para acessar a rede ou outros arquivos do computador. O `-protocol_whitelist file` reforça que apenas arquivos locais podem ser abertos.
+
+Ambos os motores são iniciados com `spawn`, argumentos em array e `shell: false`. No timeout, o serviço encerra a árvore do processo (`taskkill /T /F` no Windows, grupo de processos em sistemas POSIX) e retorna 500. A saída deve existir com a extensão esperada e tamanho maior que zero.
+
+A limpeza fica em `finally`, depois que o processo termina e que o envio do arquivo conclui ou falha. Remove upload, saída e perfil em sucesso, erro, timeout e desconexão, inclusive quando o upload é interrompido no meio. Interrupção forçada do Node ou desligamento da máquina não executam `finally`.
 
 ## Roadmap
 
 - Imagens (JPG, PNG, WEBP) com redimensionamento e compressão.
-- Conversão em lote, com download em ZIP.
+- Áudio (MP3, WAV, OGG) e extração do áudio de vídeos.
+- Extrair ZIP e converter os arquivos de dentro em lote.
 - PDF como formato de entrada (PDF → DOCX).
 - Deploy público com HTTPS, limite de requisições por IP e verificação antivírus.
-
-A versão atual roda localmente e recebe um arquivo por requisição.
 
 ## Licença
 
