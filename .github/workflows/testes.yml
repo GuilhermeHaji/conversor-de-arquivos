@@ -1,5 +1,5 @@
 # Executa a suíte de testes a cada push e pull request.
-# Os testes simulam o processo do LibreOffice, então o runner não precisa instalá-lo.
+# Os testes simulam o LibreOffice e o FFmpeg, então o runner não precisa de nenhum dos dois.
 name: Testes
 
 on:
@@ -20,16 +20,18 @@ jobs:
 
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # --ignore-scripts evita baixar o binário do FFmpeg (ffmpeg-static), que os testes não usam
+      # e cujo download pela internet pode falhar de forma intermitente.
       - name: Instalar dependências
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Rodar testes
         run: npm test
