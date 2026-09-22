@@ -2,6 +2,8 @@
 
 Plataforma web local para converter documentos, planilhas e apresentações com Node.js e LibreOffice.
 
+![Interface do conversor com um arquivo selecionado e o destino PDF escolhido](docs/screenshot.png)
+
 ## Sobre o projeto
 
 Trocar arquivos entre ferramentas exige formatos diferentes: um documento editável para colaborar, um PDF para compartilhar ou um CSV para trabalhar com dados. Este projeto reúne essas conversões em uma página simples, com seleção de destino e download automático, executando o processamento no computador em que o servidor foi iniciado.
@@ -80,15 +82,28 @@ npm install
 npm start
 ```
 
-Abra **http://localhost:3000**. O servidor escuta apenas na interface local (`127.0.0.1`). Se o PowerShell bloquear `npm.ps1`, use `npm.cmd install` e `npm.cmd start`.
+Abra **http://localhost:3000**. Por padrão o servidor escuta apenas na interface local (`127.0.0.1`); as variáveis de ambiente `HOST` e `PORT` alteram isso quando necessário. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd install` e `npm.cmd start`.
 
 Ao iniciar, o servidor executa `soffice --headless --version`. Se o comando estiver ausente ou não puder ser executado, informa como instalar/configurar o LibreOffice e encerra com código 1, sem abrir a porta.
+
+### Docker
+
+Para rodar sem instalar Node ou LibreOffice na máquina, a imagem já inclui os dois:
+
+```sh
+docker build -t conversor-de-arquivos .
+docker run --rm -p 3000:3000 conversor-de-arquivos
+```
+
+A imagem parte de `node:22-bookworm-slim`, instala apenas Writer, Calc e Impress, roda como usuário sem privilégios e expõe a porta 3000 com `HOST=0.0.0.0`. Um `HEALTHCHECK` consulta `/status` a cada 30 segundos.
 
 ### Testes automatizados
 
 ```sh
 npm test
 ```
+
+Os testes também rodam automaticamente no GitHub Actions a cada push e pull request, em Linux e Windows (`.github/workflows/testes.yml`).
 
 Usam o runner nativo do Node e o fluxo HTTP real, com o processo do LibreOffice simulado. Cobrem os sete pares permitidos, `/formats`, destino ausente/inválido, validação de conteúdo, tamanho, nomes, saída com extensão incorreta ou vazia, erros, timeout e limpeza. Também verificam cinco conversões simultâneas com no máximo dois processos, fila cheia, espera excedida, cancelamento durante a espera e os contadores de `/status`. Não exigem LibreOffice e não verificam a fidelidade visual da conversão; use o teste manual acima para isso.
 
@@ -150,7 +165,12 @@ public/
   app.js
 test/
   conversion.test.js
-  queue.test.js
+docs/
+  screenshot.png
+.github/workflows/
+  testes.yml
+Dockerfile
+.dockerignore
 package.json
 package-lock.json
 .gitignore
@@ -214,16 +234,13 @@ A limpeza fica em `finally`, depois que o processo termina e que o envio do arqu
 
 ## Roadmap
 
-- Adicionar novos formatos de entrada e saída.
-- Suportar conversão de arquivos em lote.
-- Preparar uma versão para deploy.
+- Imagens (JPG, PNG, WEBP) com redimensionamento e compressão.
+- Conversão em lote, com download em ZIP.
+- PDF como formato de entrada (PDF → DOCX).
+- Deploy público com HTTPS, limite de requisições por IP e verificação antivírus.
 
-Esses itens são próximos passos; a versão atual roda localmente e recebe um arquivo por requisição.
+A versão atual roda localmente e recebe um arquivo por requisição.
 
 ## Licença
 
 Distribuído sob a licença [MIT](LICENSE). Copyright © 2026 Guilherme Haji.
-
-## Demonstração
-
-**Placeholder:** adicione uma captura real da interface em `docs/screenshot.png` e inclua-a nesta seção. Nenhuma imagem de demonstração foi adicionada ainda.

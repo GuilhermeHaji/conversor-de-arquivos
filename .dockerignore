@@ -1,0 +1,12 @@
+node_modules
+tmp
+.git
+.github
+test
+docs
+Claude outputs
+iniciar.cmd
+README.md
+LICENSE
+Dockerfile
+.dockerignore

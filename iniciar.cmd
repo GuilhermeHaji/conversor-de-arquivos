@@ -45,6 +45,15 @@ echo Ponto de retorno criado com sucesso.
 echo Historico:
 git log --oneline -n 3
 
+rem Se o projeto ja estiver ligado ao GitHub, envia os commits.
+git remote get-url origin >nul 2>&1
+if errorlevel 1 goto verificar
+echo Enviando para o GitHub...
+git push -u origin main
+if errorlevel 1 echo Nao foi possivel enviar para o GitHub agora. O commit local esta salvo; tente de novo depois.
+
+:verificar
+
 echo.
 echo === 3/4 Verificando Node e LibreOffice ===
 where node >nul 2>&1
