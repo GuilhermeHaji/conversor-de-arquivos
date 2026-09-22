@@ -131,7 +131,7 @@ Todos os limites vêm de variáveis de ambiente. Os padrões valem para uso loca
 | `MAX_VIDEO_MB` | 500 | 100 | Tamanho máximo de vídeos |
 | `ZIP_MAX_MB` / `ZIP_MAX_FILES` | 200 / 20 | 100 / 20 | Limites da compactação em ZIP |
 | `MAX_CONCURRENT` | 2 | 2 | Tarefas executando ao mesmo tempo no servidor |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MIN` | desligado / 10 | 20 / 10 | Conversões por visitante numa janela de minutos |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MIN` | desligado / 10 | 60 / 10 | Conversões por visitante numa janela de minutos |
 | `MAX_ACTIVE_PER_IP` | desligado | 2 | Conversões simultâneas por visitante |
 | `TRUST_PROXY` | 0 | 1 | Proxies confiáveis na frente do servidor (para identificar o IP real) |
 | `HOST` / `PORT` | 127.0.0.1 / 3000 | 0.0.0.0 / 3000 | Endereço e porta do servidor |

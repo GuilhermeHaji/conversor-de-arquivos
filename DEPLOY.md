@@ -8,7 +8,7 @@ O que vai rodar no servidor:
 Visitante ──HTTPS──▶ Caddy (portas 80/443, certificado automático) ──▶ Conversor (porta 3000, interna)
 ```
 
-Tudo sobe com `docker compose`, a partir deste repositório. Os limites para o público (vídeo até 100 MB, 20 conversões a cada 10 minutos por visitante, no máximo 2 simultâneas) estão em `docker-compose.yml` e podem ser ajustados no arquivo `.env` do servidor.
+Tudo sobe com `docker compose`, a partir deste repositório. Os limites para o público (vídeo até 100 MB, 60 conversões a cada 10 minutos por visitante, no máximo 2 simultâneas) estão em `docker-compose.yml` e podem ser ajustados no arquivo `.env` do servidor.
 
 ---
 

@@ -15,8 +15,8 @@ services:
       ZIP_MAX_MB: ${ZIP_MAX_MB:-100}
       ZIP_MAX_FILES: ${ZIP_MAX_FILES:-20}
       MAX_CONCURRENT: ${MAX_CONCURRENT:-2}
-      # Por IP: até 20 conversões a cada 10 minutos, no máximo 2 ao mesmo tempo.
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-20}
+      # Por IP: até 60 conversões a cada 10 minutos, no máximo 2 ao mesmo tempo.
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-60}
       RATE_LIMIT_WINDOW_MIN: ${RATE_LIMIT_WINDOW_MIN:-10}
       MAX_ACTIVE_PER_IP: ${MAX_ACTIVE_PER_IP:-2}
     # Só o Caddy acessa o conversor; a porta 3000 não fica exposta na internet.
